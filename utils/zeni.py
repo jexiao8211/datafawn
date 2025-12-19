@@ -14,6 +14,23 @@ def zeni_algorithm(pose_data_with_rel,
     1. Local maxima in vertical position (y-coordinate) - paw at lowest point
     2. Low velocity at contact point
     3. Minimum contact duration to filter noise
+
+    **CORE ASSUMPTIONS**:
+    - vertical position indicates ground contact. may not hold if:
+        - uneven terrain
+        - camera is not orthogonal to subject
+        - animal is climbing or jumping
+    - smooth, continuous movements
+    - animal is in stride/gait. may not hold if
+        - complex gaits, animal is stationary
+    - low velocity at contact. may not hold if
+        - fast running
+        - slipping
+    - reference point stability
+    - contact lasts for some minimum duration (multiple consecutive frames)
+        - framerate must be consistent
+
+    In a nutshell, we can tell if this algo is going to work based on our relative x and y position graphs. If they look terrible, its not gonna work
     
     Parameters:
     -----------
