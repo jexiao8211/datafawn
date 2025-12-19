@@ -2,11 +2,10 @@ import cv2
 import numpy as np
 from pathlib import Path
 import matplotlib.pyplot as plt
+import pandas as pd
+import matplotlib.gridspec as gridspec
 
-
-import matplotlib.pyplot as plt
-import numpy as np
-
+# ========== BODYPART MOVEMENT VISUALIZATION ========== #
 def plot_bodypart_movement(data, bodypart, individual='animal0', min_likelihood=0.0, 
                            figsize=(15, 5), show_trajectory=True):
     """
@@ -159,7 +158,7 @@ def plot_bodypart_movement_enhanced(data, bodypart, individual='animal0',
     plt.tight_layout()
     return fig
 
-
+# ========== VIDEO EXTRACTION ========== #
 def get_frame_from_video(video_path, frame_number, display=False, convert_rgb=False):
     """
     Extract a specific frame from a video file.
@@ -323,3 +322,295 @@ def extract_video_clip(video_path, start_frame, end_frame=None, output_path=None
     
     print(f"Video clip saved to: {output_path}")
     return str(output_path)
+
+
+
+# ========== ERROR DETECTION VISUALIZATION ========== #
+
+def visualize_error_masks(error_details, bodyparts, figsize=(16, 12)):
+    """
+    Visualize error masks for each paw and each error type.
+    
+    Parameters:
+    -----------
+    error_details : pd.DataFrame
+        Error details DataFrame from detect_pose_errors()
+    bodyparts : list
+        List of bodypart names (e.g., ['front_left_paw', 'front_right_paw', ...])
+    figsize : tuple, default=(16, 12)
+        Figure size
+    """
+    error_types = ['velocity', 'likelihood', 'distance', 'error']
+    n_paws = len(bodyparts)
+    n_types = len(error_types)
+    
+    # Create figure with subplots: one row per paw, one column per error type
+    fig = plt.figure(figsize=figsize)
+    gs = gridspec.GridSpec(n_paws, n_types, figure=fig, hspace=0.3, wspace=0.3)
+    
+    # Color map for each error type
+    colors = {
+        'velocity': 'red',
+        'likelihood': 'orange',
+        'distance': 'purple',
+        'error': 'black'
+    }
+    
+    # Plot each paw and each error type
+    for paw_idx, paw in enumerate(bodyparts):
+        for type_idx, error_type in enumerate(error_types):
+            ax = fig.add_subplot(gs[paw_idx, type_idx])
+            
+            # Get error mask for this paw and error type
+            error_mask = error_details[f'{paw}_{error_type}']
+            
+            # Plot error mask
+            ax.fill_between(
+                error_mask.index,
+                0,
+                error_mask.astype(int),
+                alpha=0.6,
+                color=colors[error_type],
+                label=f'{error_type} errors'
+            )
+            
+            # Add statistics
+            n_errors = error_mask.sum()
+            error_pct = 100 * error_mask.mean()
+            
+            ax.set_title(f'{paw}\n{error_type.title()} Errors\n'
+                        f'{n_errors} frames ({error_pct:.1f}%)',
+                        fontsize=10, fontweight='bold')
+            ax.set_xlabel('Frame', fontsize=9)
+            ax.set_ylabel('Error (1=error, 0=ok)', fontsize=9)
+            ax.set_ylim(-0.1, 1.1)
+            ax.grid(True, alpha=0.3)
+            ax.set_yticks([0, 1])
+            ax.set_yticklabels(['OK', 'Error'])
+    
+    plt.suptitle('Error Masks by Paw and Error Type', fontsize=14, fontweight='bold', y=0.995)
+    plt.tight_layout()
+    return fig
+
+
+def visualize_error_masks_combined(error_details, bodyparts, figsize=(18, 10)):
+    """
+    Visualize all error types for each paw in a single plot per paw.
+    Shows all three error types overlaid.
+    
+    Parameters:
+    -----------
+    error_details : pd.DataFrame
+        Error details DataFrame from detect_pose_errors()
+    bodyparts : list
+        List of bodypart names
+    figsize : tuple, default=(18, 10)
+        Figure size
+    """
+    error_types = ['velocity', 'likelihood', 'distance', 'error']
+    colors = {
+        'velocity': 'red',
+        'likelihood': 'orange',
+        'distance': 'purple',
+        'error': 'black'
+    }
+    
+    n_paws = len(bodyparts)
+    fig, axes = plt.subplots(n_paws, 1, figsize=figsize, sharex=True)
+    
+    if n_paws == 1:
+        axes = [axes]
+    
+    for paw_idx, paw in enumerate(bodyparts):
+        ax = axes[paw_idx]
+        
+        # Plot each error type
+        for error_type in error_types:
+            error_mask = error_details[f'{paw}_{error_type}']
+            
+            # Offset each error type slightly for visibility
+            offset = error_types.index(error_type) * 0.3
+            
+            ax.fill_between(
+                error_mask.index,
+                offset,
+                offset + error_mask.astype(float),
+                alpha=0.7,
+                color=colors[error_type],
+                label=f'{error_type.title()} ({error_mask.sum()} frames)'
+            )
+        
+        ax.set_title(f'{paw} - All Error Types', fontsize=12, fontweight='bold')
+        ax.set_ylabel('Error Type', fontsize=10)
+        ax.set_ylim(-0.2, 1.5)
+        ax.set_yticks([0.15, 0.45, 0.75, 1.2])
+        ax.set_yticklabels(['Velocity', 'Likelihood', 'Distance', 'Any'])
+        ax.grid(True, alpha=0.3, axis='x')
+        ax.legend(loc='upper right', fontsize=9)
+    
+    axes[-1].set_xlabel('Frame', fontsize=11)
+    plt.suptitle('Error Masks by Paw (All Types Combined)', fontsize=14, fontweight='bold')
+    plt.tight_layout()
+    return fig
+
+
+def visualize_error_summary(error_details, bodyparts, figsize=(14, 8)):
+    """
+    Create summary visualizations: error counts and percentages.
+    
+    Parameters:
+    -----------
+    error_details : pd.DataFrame
+        Error details DataFrame from detect_pose_errors()
+    bodyparts : list
+        List of bodypart names
+    figsize : tuple, default=(14, 8)
+        Figure size
+    """
+    error_types = ['velocity', 'likelihood', 'distance', 'error']
+    
+    # Calculate statistics
+    stats = []
+    for paw in bodyparts:
+        for error_type in error_types:
+            mask = error_details[f'{paw}_{error_type}']
+            stats.append({
+                'Paw': paw,
+                'Error Type': error_type.title(),
+                'Count': mask.sum(),
+                'Percentage': 100 * mask.mean()
+            })
+    
+    stats_df = pd.DataFrame(stats)
+    
+    # Create figure with two subplots
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=figsize)
+    
+    # Plot 1: Error counts by paw and type
+    pivot_counts = stats_df.pivot(index='Paw', columns='Error Type', values='Count')
+    pivot_counts.plot(kind='bar', ax=ax1, width=0.8)
+    ax1.set_title('Error Counts by Paw and Type', fontsize=12, fontweight='bold')
+    ax1.set_xlabel('Paw', fontsize=11)
+    ax1.set_ylabel('Number of Error Frames', fontsize=11)
+    ax1.legend(title='Error Type', fontsize=9)
+    ax1.grid(True, alpha=0.3, axis='y')
+    ax1.tick_params(axis='x', rotation=45)
+    
+    # Plot 2: Error percentages by paw and type
+    pivot_pct = stats_df.pivot(index='Paw', columns='Error Type', values='Percentage')
+    pivot_pct.plot(kind='bar', ax=ax2, width=0.8)
+    ax2.set_title('Error Percentages by Paw and Type', fontsize=12, fontweight='bold')
+    ax2.set_xlabel('Paw', fontsize=11)
+    ax2.set_ylabel('Error Percentage (%)', fontsize=11)
+    ax2.legend(title='Error Type', fontsize=9)
+    ax2.grid(True, alpha=0.3, axis='y')
+    ax2.tick_params(axis='x', rotation=45)
+    
+    plt.tight_layout()
+    
+    # Print summary table
+    print("\nError Summary Statistics:")
+    print("=" * 60)
+    print(stats_df.to_string(index=False))
+    print("=" * 60)
+    
+    return fig, stats_df
+
+
+def visualize_error_timeline(error_details, bodyparts, 
+                              figsize=(16, 6)):
+    """
+    Visualize error timeline showing when errors occur across all paws.
+    
+    Parameters:
+    -----------
+    error_details : pd.DataFrame
+        Error details DataFrame from detect_pose_errors()
+    bodyparts : list
+        List of bodypart names
+    error_mask : pd.Series, optional
+        Overall error mask from detect_pose_errors()
+    figsize : tuple, default=(16, 6)
+        Figure size
+    """
+    fig, ax = plt.subplots(figsize=figsize)
+    
+    # Create a combined error timeline
+    # Stack errors from different paws vertically
+    y_positions = {}
+    for idx, paw in enumerate(bodyparts):
+        y_positions[paw] = idx
+    
+    error_types = ['velocity', 'likelihood', 'distance', 'error']
+    colors = {'velocity': 'red', 'likelihood': 'orange', 'distance': 'purple', 'error': 'black'}
+    
+    # Plot errors for each paw
+    for paw in bodyparts:
+        y_base = y_positions[paw]
+        
+        for error_type in error_types:
+            mask = error_details[f'{paw}_{error_type}']
+            error_frames = mask.index[mask]
+            
+            if len(error_frames) > 0:
+                y_offset = error_types.index(error_type) * 0.25
+                ax.scatter(
+                    error_frames,
+                    [y_base + y_offset] * len(error_frames),
+                    c=colors[error_type],
+                    s=20,
+                    alpha=0.6,
+                    label=f'{paw} {error_type}' if paw == bodyparts[0] else ''
+                )
+    
+    
+    ax.set_yticks([y_positions[paw] for paw in bodyparts])
+    ax.set_yticklabels(bodyparts)
+    ax.set_xlabel('Frame', fontsize=11)
+    ax.set_ylabel('Paw', fontsize=11)
+    ax.set_title('Error Timeline Across All Paws', fontsize=12, fontweight='bold')
+    ax.grid(True, alpha=0.3, axis='x')
+    ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left', fontsize=9)
+    
+    plt.tight_layout()
+    return fig
+
+
+# ========== ZENI ALGORITHM VISUALIZATION ========== #
+def plot_strikes(pose_data_with_rel, strikes, paw_name, crop_from, crop_to):
+    """Plot paw movement with detected strikes marked."""
+    import matplotlib.pyplot as plt
+    
+    if crop_from is not None:
+        pose_data_with_rel = pose_data_with_rel.iloc[crop_from:]
+    if crop_to is not None:
+        pose_data_with_rel = pose_data_with_rel.iloc[:crop_to]
+
+    scorer = pose_data_with_rel.columns.get_level_values(0).unique()[0]
+    individual = pose_data_with_rel.columns.get_level_values(1).unique()[0]
+    rel_bodypart = f'{paw_name}_rel'
+    
+    y_rel = pose_data_with_rel[(scorer, individual, rel_bodypart, 'y')]
+    likelihood = pose_data_with_rel[(scorer, individual, rel_bodypart, 'likelihood')]
+    
+    fig, ax = plt.subplots(figsize=(15, 5))
+    
+    # Plot y position
+    ax.plot(y_rel.index, y_rel.values, 'b-', alpha=0.5, label='Y position')
+    
+    # Mark strikes
+    strike_frames = strikes[paw_name]
+    if len(strike_frames) > 0:
+        strike_frames = [frame for frame in strike_frames if frame >= crop_from and frame <= crop_to]
+        strike_y = y_rel.loc[strike_frames]
+        ax.scatter(strike_frames, strike_y.values, color='red', s=100, 
+                  marker='v', label='Foot strikes', zorder=5)
+    
+    ax.set_xlabel('Frame')
+    ax.set_ylabel('Relative Y position (pixels)')
+    ax.set_title(f'{paw_name} - Foot Strikes Detected')
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+    plt.tight_layout()
+    plt.show()
+
