@@ -1,5 +1,5 @@
-/processed_vids
-/videos
-/snippets
-/finished_vids
+data/**
+!data/.gitkeep
+
+
 *__pycache__
