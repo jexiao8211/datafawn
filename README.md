@@ -55,7 +55,7 @@ Set up the conda environment:
 
 ```bash
 conda env create -f environment.yml
-conda activate DEEPLABCUT
+conda activate fawn
 ```
 
 ## Usage
