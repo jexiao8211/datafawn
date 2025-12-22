@@ -9,23 +9,23 @@ import pandas as pd
 from pathlib import Path
 
 from datafawn.pipeline import EventExtractor
-from event_extraction.zeni import zeni_algorithm_vis
+from event_extraction.zeni import zeni_algorithm
 
 
 class ZeniExtractor(EventExtractor):
     """
     Event extractor using the Zeni algorithm for foot strike detection.
     
-    Wraps the zeni_algorithm_vis function.
+    Wraps the zeni_algorithm function.
     """
     
     def __init__(
         self,
-        window_size: int = 5,
-        min_contact_duration: int = 3,
-        velocity_threshold: float = 10,
-        prominence_percentage: float = 0.05,
-        show_plots: bool = False,
+        # window_size: int = 5,
+        # min_contact_duration: int = 3,
+        # velocity_threshold: float = 10,
+        # prominence_percentage: float = 0.05,
+        # show_plots: bool = False,
         name: Optional[str] = None
     ):
         """
@@ -50,11 +50,11 @@ class ZeniExtractor(EventExtractor):
         show_plots : bool, default=False
             Whether to show plots during extraction
         """
-        self.window_size = window_size
-        self.min_contact_duration = min_contact_duration
-        self.velocity_threshold = velocity_threshold
-        self.prominence_percentage = prominence_percentage
-        self.show_plots = show_plots
+        # self.window_size = window_size
+        # self.min_contact_duration = min_contact_duration
+        # self.velocity_threshold = velocity_threshold
+        # self.prominence_percentage = prominence_percentage
+        # self.show_plots = show_plots
         self._name = name or "zeni"
     
     @property
@@ -91,29 +91,31 @@ class ZeniExtractor(EventExtractor):
             - 'metadata': dict with algorithm parameters
         """
         # Get parameters (kwargs override instance defaults)
-        window_size = kwargs.pop('window_size', self.window_size)
-        min_contact_duration = kwargs.pop('min_contact_duration', self.min_contact_duration)
-        velocity_threshold = kwargs.pop('velocity_threshold', self.velocity_threshold)
-        prominence_percentage = kwargs.pop('prominence_percentage', self.prominence_percentage)
-        show_plots = kwargs.pop('show_plots', self.show_plots)
+        # window_size = kwargs.pop('window_size', self.window_size)
+        # min_contact_duration = kwargs.pop('min_contact_duration', self.min_contact_duration)
+        # velocity_threshold = kwargs.pop('velocity_threshold', self.velocity_threshold)
+        # prominence_percentage = kwargs.pop('prominence_percentage', self.prominence_percentage)
+        # show_plots = kwargs.pop('show_plots', self.show_plots)
         
         
         # Run Zeni algorithm
-        strikes = zeni_algorithm_vis(
+        strikes = zeni_algorithm(
             postprocessed_data,
-            window_size=window_size,
-            min_contact_duration=min_contact_duration,
-            velocity_threshold=velocity_threshold,
-            prominence_percentage=prominence_percentage,
-            show_plots=show_plots
+            **kwargs
+
+            # window_size=window_size,
+            # min_contact_duration=min_contact_duration,
+            # velocity_threshold=velocity_threshold,
+            # prominence_percentage=prominence_percentage,
+            # show_plots=show_plots
         )
         
         return {
             'strikes': strikes,
             'metadata': {
-                'window_size': window_size,
-                'min_contact_duration': min_contact_duration,
-                'velocity_threshold': velocity_threshold,
-                'prominence_percentage': prominence_percentage,
+                # 'window_size': window_size,
+                # 'min_contact_duration': min_contact_duration,
+                # 'velocity_threshold': velocity_threshold,
+                # 'prominence_percentage': prominence_percentage,
             }
         }
