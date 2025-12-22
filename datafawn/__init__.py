@@ -11,6 +11,10 @@ from datafawn.pipeline import (
     EventExtractor
 )
 
+from datafawn.pose_estimators import (
+    DeepLabCutPoseEstimator
+)
+
 from datafawn.postprocessors import (
     RelativePawPositionPostprocessor,
     ErrorPostprocessor
@@ -25,6 +29,8 @@ __all__ = [
     'PoseEstimator',
     'Postprocessor',
     'EventExtractor',
+
+    'DeepLabCutPoseEstimator',
 
     'RelativePawPositionPostprocessor',
     'ErrorPostprocessor',
