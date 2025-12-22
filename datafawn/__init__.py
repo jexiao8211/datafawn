@@ -24,6 +24,10 @@ from datafawn.event_extractors import (
     ZeniExtractor
 )
 
+from datafawn.vis import (
+    plot_bodyparts_position
+)
+
 __all__ = [
     'EventDetectionPipeline',
     'PoseEstimator',
@@ -35,6 +39,8 @@ __all__ = [
     'RelativePawPositionPostprocessor',
     'ErrorPostprocessor',
 
-    'ZeniExtractor'
+    'ZeniExtractor',
+
+    'plot_bodyparts_position'
 ]
 

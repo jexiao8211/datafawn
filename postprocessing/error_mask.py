@@ -1,7 +1,6 @@
 import numpy as np
 import pandas as pd
 
-# =============== ERROR DETECTION FUNCTIONS =============== #
 
 def detect_velocity_errors(df, bodyparts, threshold_pixels=50, window_size=5):
     """

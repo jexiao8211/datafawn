@@ -174,8 +174,8 @@ class ErrorPostprocessor(Postprocessor):
                         continue
         
         # Apply forward fill, then backward fill
-        corrected_data = corrected_data.ffill()
-        corrected_data = corrected_data.bfill()
+        # corrected_data = corrected_data.ffill()
+        # corrected_data = corrected_data.bfill()
         
         return corrected_data
 
