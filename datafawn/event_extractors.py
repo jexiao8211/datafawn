@@ -9,24 +9,24 @@ import pandas as pd
 from pathlib import Path
 
 from datafawn.pipeline import EventExtractor
-from event_extraction.zeni import zeni_algorithm_vis
+from event_extraction.zeni import zeni_algorithm
 
 
 class ZeniExtractor(EventExtractor):
     """
     Event extractor using the Zeni algorithm for foot strike detection.
     
-    Wraps the zeni_algorithm_vis function.
+    Wraps the zeni_algorithm function.
     """
     
     def __init__(
         self,
-        window_size: int = 5,
-        min_contact_duration: int = 3,
-        velocity_threshold: float = 10,
+        smooth_window_size: int = 5,
         prominence_percentage: float = 0.05,
+        orientation_likelihood_threshold: float = 0.0,
+        orientation_smooth_window_size: int = 15,
         show_plots: bool = False,
-        name: Optional[str] = None
+        name: Optional[str] = None,
     ):
         """
         Initialize the Zeni extractor.
@@ -35,25 +35,21 @@ class ZeniExtractor(EventExtractor):
         -----------
         window_size : int, default=5
             Window size for smoothing
-        min_contact_duration : int, default=3
-            Minimum contact duration (not used in simplified algorithm)
-        velocity_threshold : float, default=10
-            Velocity threshold (not used in simplified algorithm)
         prominence_percentage : float, default=0.05
             Prominence percentage for peak detection
-        auto_detect_errors : bool, default=True
-            If True, automatically detect pose errors and create error_mask.
-            If False, error_mask must be provided in extract() kwargs.
-        error_detection_kwargs : dict, optional
-            Keyword arguments for error detection if auto_detect_errors=True.
-            See detect_pose_errors() for available options.
+        orientation_likelihood_threshold : float, default=0.0
+            Minimum likelihood for orientation data to be considered valid.
+        orientation_smooth_window_size : int, default=15
+            Window size for smoothing orientation when determining direction of motion.
         show_plots : bool, default=False
             Whether to show plots during extraction
+        name : str, optional
+            Name of the extractor. Default is "zeni".
         """
-        self.window_size = window_size
-        self.min_contact_duration = min_contact_duration
-        self.velocity_threshold = velocity_threshold
+        self.smooth_window_size = smooth_window_size
         self.prominence_percentage = prominence_percentage
+        self.orientation_likelihood_threshold = orientation_likelihood_threshold
+        self.orientation_smooth_window_size = orientation_smooth_window_size
         self.show_plots = show_plots
         self._name = name or "zeni"
     
@@ -91,29 +87,30 @@ class ZeniExtractor(EventExtractor):
             - 'metadata': dict with algorithm parameters
         """
         # Get parameters (kwargs override instance defaults)
-        window_size = kwargs.pop('window_size', self.window_size)
-        min_contact_duration = kwargs.pop('min_contact_duration', self.min_contact_duration)
-        velocity_threshold = kwargs.pop('velocity_threshold', self.velocity_threshold)
+        smooth_window_size = kwargs.pop('smooth_window_size', self.smooth_window_size)
         prominence_percentage = kwargs.pop('prominence_percentage', self.prominence_percentage)
+        orientation_likelihood_threshold = kwargs.pop('orientation_likelihood_threshold', self.orientation_likelihood_threshold)
+        orientation_smooth_window_size = kwargs.pop('orientation_smooth_window_size', self.orientation_smooth_window_size)
         show_plots = kwargs.pop('show_plots', self.show_plots)
         
         
         # Run Zeni algorithm
-        strikes = zeni_algorithm_vis(
+        strikes = zeni_algorithm(
             postprocessed_data,
-            window_size=window_size,
-            min_contact_duration=min_contact_duration,
-            velocity_threshold=velocity_threshold,
+            smooth_window_size=smooth_window_size,
             prominence_percentage=prominence_percentage,
+            orientation_likelihood_threshold=orientation_likelihood_threshold,
+            orientation_smooth_window_size=orientation_smooth_window_size,
             show_plots=show_plots
         )
         
         return {
             'strikes': strikes,
             'metadata': {
-                'window_size': window_size,
-                'min_contact_duration': min_contact_duration,
-                'velocity_threshold': velocity_threshold,
+                'smooth_window_size': smooth_window_size,
                 'prominence_percentage': prominence_percentage,
+                'orientation_likelihood_threshold': orientation_likelihood_threshold,
+                'orientation_smooth_window_size': orientation_smooth_window_size,
+                'show_plots': show_plots
             }
         }
