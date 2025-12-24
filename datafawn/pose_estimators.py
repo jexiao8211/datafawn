@@ -53,6 +53,9 @@ class DeepLabCutPoseEstimator(PoseEstimator):
         self.max_individuals = max_individuals
         self.pcutoff = pcutoff
         self.device = device
+
+        if self.max_individuals > 1:
+            raise ValueError("Pipeline only supports single individual tracking for now.")
     
     def estimate(
         self, 
