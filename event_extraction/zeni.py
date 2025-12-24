@@ -107,6 +107,7 @@ def zeni_algorithm(pose_data_with_rel,
  
             # For each paw
             for rel_paw in rel_paws:
+                event_name = rel_paw.replace('_rel', '_strike')
                 # Extract relative x and y coordinates
                 x = pose_data_with_rel[(scorer, individual, rel_paw, 'x')]
                 y = pose_data_with_rel[(scorer, individual, rel_paw, 'y')]
@@ -144,11 +145,11 @@ def zeni_algorithm(pose_data_with_rel,
 
 
 
-                strikes[(scorer, individual)][rel_paw] = sorted(forward_maxima)
+                strikes[(scorer, individual)][event_name] = sorted(forward_maxima)
 
                 if show_plots:
                     visualize_zeni_steps(
-                        paw_name=rel_paw,
+                        event_name=event_name,
                         x=x,
                         y=y,
                         x_smooth=x_rel_smooth,
@@ -159,7 +160,7 @@ def zeni_algorithm(pose_data_with_rel,
 
     return strikes
 
-def visualize_zeni_steps(paw_name,
+def visualize_zeni_steps(event_name,
                          x,
                          y,
                          x_smooth,
@@ -170,7 +171,7 @@ def visualize_zeni_steps(paw_name,
     # Create visualization
     fig = plt.figure(figsize=figsize)
     gs = gridspec.GridSpec(2, 3, figure=fig, hspace=0.4, wspace=0.3)
-    fig.suptitle(f'{paw_name} - Simplified Zeni Algorithm Visualization', 
+    fig.suptitle(f'{event_name} - Simplified Zeni Algorithm Visualization', 
                 fontsize=16, fontweight='bold', y=0.995)
     
     frames = x.index.values

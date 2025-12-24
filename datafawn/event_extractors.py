@@ -71,46 +71,32 @@ class ZeniExtractor(EventExtractor):
         postprocessed_data : pd.DataFrame
             Postprocessed pose data (should include relative positions)
         **kwargs
-            Additional parameters:
-            - error_mask : pd.DataFrame, optional
-                Error mask DataFrame. Required if auto_detect_errors=False.
-            - scorer : str, optional
-            - individual : str, optional
-            - Other parameters override instance defaults
+            Ignored. All parameters are set at initialization.
             
         Returns:
         --------
         Dict[str, Any]
             Dictionary containing:
-            - 'strikes': dict mapping paw names to lists of frame indices
-            - 'figs': dict mapping paw names to matplotlib figures (if show_plots=False)
+            - 'events': dict mapping (scorer, individual) to event dictionaries
             - 'metadata': dict with algorithm parameters
         """
-        # Get parameters (kwargs override instance defaults)
-        smooth_window_size = kwargs.pop('smooth_window_size', self.smooth_window_size)
-        prominence_percentage = kwargs.pop('prominence_percentage', self.prominence_percentage)
-        orientation_likelihood_threshold = kwargs.pop('orientation_likelihood_threshold', self.orientation_likelihood_threshold)
-        orientation_smooth_window_size = kwargs.pop('orientation_smooth_window_size', self.orientation_smooth_window_size)
-        show_plots = kwargs.pop('show_plots', self.show_plots)
-        
-        
-        # Run Zeni algorithm
+        # Run Zeni algorithm with instance parameters
         strikes = zeni_algorithm(
             postprocessed_data,
-            smooth_window_size=smooth_window_size,
-            prominence_percentage=prominence_percentage,
-            orientation_likelihood_threshold=orientation_likelihood_threshold,
-            orientation_smooth_window_size=orientation_smooth_window_size,
-            show_plots=show_plots
+            smooth_window_size=self.smooth_window_size,
+            prominence_percentage=self.prominence_percentage,
+            orientation_likelihood_threshold=self.orientation_likelihood_threshold,
+            orientation_smooth_window_size=self.orientation_smooth_window_size,
+            show_plots=self.show_plots
         )
         
         return {
-            'strikes': strikes,
+            'events': strikes,
             'metadata': {
-                'smooth_window_size': smooth_window_size,
-                'prominence_percentage': prominence_percentage,
-                'orientation_likelihood_threshold': orientation_likelihood_threshold,
-                'orientation_smooth_window_size': orientation_smooth_window_size,
-                'show_plots': show_plots
+                'smooth_window_size': self.smooth_window_size,
+                'prominence_percentage': self.prominence_percentage,
+                'orientation_likelihood_threshold': self.orientation_likelihood_threshold,
+                'orientation_smooth_window_size': self.orientation_smooth_window_size,
+                'show_plots': self.show_plots
             }
         }
