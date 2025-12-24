@@ -77,8 +77,7 @@ class ErrorPostprocessor(Postprocessor):
         pose_data : pd.DataFrame
             Pose data with MultiIndex columns (scorer, individual, bodypart, coords)
         **kwargs
-            Additional parameters that override instance settings:
-            - Any parameters for error detection functions
+            Ignored. All parameters are set at initialization.
             
         Returns:
         --------
@@ -94,37 +93,28 @@ class ErrorPostprocessor(Postprocessor):
         
         # Run velocity error detection if enabled
         if self.use_velocity:
-            velocity_kwargs = {**self.velocity_kwargs, **kwargs}
-            velocity_kwargs.pop('scorer', None)  # Remove if present, will add back
-            velocity_kwargs.pop('individual', None)
             velocity_mask = detect_velocity_errors(
                 pose_data,
                 self.bodyparts,
-                **velocity_kwargs
+                **self.velocity_kwargs
             )
             error_masks.append(velocity_mask)
         
         # Run likelihood error detection if enabled
         if self.use_likelihood:
-            likelihood_kwargs = {**self.likelihood_kwargs, **kwargs}
-            likelihood_kwargs.pop('scorer', None)
-            likelihood_kwargs.pop('individual', None)
             likelihood_mask = detect_likelihood_errors(
                 pose_data,
                 self.bodyparts,
-                **likelihood_kwargs
+                **self.likelihood_kwargs
             )
             error_masks.append(likelihood_mask)
         
         # Run distance error detection if enabled
         if self.use_distance:
-            distance_kwargs = {**self.distance_kwargs, **kwargs}
-            distance_kwargs.pop('scorer', None)
-            distance_kwargs.pop('individual', None)
             distance_mask = detect_distance_errors(
                 pose_data,
                 self.bodyparts,
-                **distance_kwargs
+                **self.distance_kwargs
             )
             error_masks.append(distance_mask)
         
@@ -196,14 +186,11 @@ class RelativePawPositionPostprocessor(Postprocessor):
         pose_data : pd.DataFrame
             Raw pose data
         **kwargs
-            Additional parameters passed to paw_to_relative_position:
-            - scorer : str, optional
-            - individual : str, optional
-            - append_to_df : bool, default=True
+            Ignored. All parameters are set at initialization.
             
         Returns:
         --------
         pd.DataFrame
             Pose data with relative position columns added
         """
-        return paw_to_relative_position(pose_data, **kwargs)
+        return paw_to_relative_position(pose_data, append_to_df=True)

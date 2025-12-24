@@ -67,7 +67,8 @@ class DeepLabCutPoseEstimator(PoseEstimator):
         video_path : str or Path
             Path to video file
         **kwargs
-            Additional parameters that override instance defaults
+            Additional parameters passed to deeplabcut.video_inference_superanimal.
+            Note: Instance parameters (model_name, detector_name, etc.) cannot be overridden.
             
         Returns:
         --------
@@ -88,24 +89,16 @@ class DeepLabCutPoseEstimator(PoseEstimator):
         else:
             device = torch.device(self.device)
         
-        # Get parameters (kwargs override instance defaults)
-        model_name = kwargs.pop('model_name', self.model_name)
-        detector_name = kwargs.pop('detector_name', self.detector_name)
-        hrnet_model = kwargs.pop('hrnet_model', self.hrnet_model)
-        max_individuals = kwargs.pop('max_individuals', self.max_individuals)
-        pcutoff = kwargs.pop('pcutoff', self.pcutoff)
-        dest_folder = kwargs.pop('dest_folder', self.dest_folder)
-        
-        # Run inference
+        # Run inference with instance parameters
         processed_videos = deeplabcut.video_inference_superanimal(
             [video_path],
-            model_name,
-            max_individuals=max_individuals,
-            model_name=hrnet_model,
-            detector_name=detector_name,
+            self.model_name,
+            max_individuals=self.max_individuals,
+            model_name=self.hrnet_model,
+            detector_name=self.detector_name,
             videotype=videotype,
-            pcutoff=pcutoff,
-            dest_folder=dest_folder,
+            pcutoff=self.pcutoff,
+            dest_folder=self.dest_folder,
             device=device,
             **kwargs
         )
@@ -113,15 +106,15 @@ class DeepLabCutPoseEstimator(PoseEstimator):
         # Load the resulting H5 file
         # DeepLabCut creates files like: {video_name}_{model_info}.h5
         video_stem = video_path.stem
-        h5_pattern = f"{video_stem}_{model_name}_{hrnet_model}_{detector_name}_*.h5"
+        h5_pattern = f"{video_stem}_{self.model_name}_{self.hrnet_model}_{self.detector_name}_*.h5"
         
-        dest_path = Path(dest_folder)
+        dest_path = Path(self.dest_folder)
         h5_files = list(dest_path.glob(h5_pattern))
         
         if not h5_files:
             raise FileNotFoundError(
                 f"Could not find output H5 file matching pattern: {h5_pattern} "
-                f"in {dest_folder}"
+                f"in {self.dest_folder}"
             )
         
         # Load the first matching file
