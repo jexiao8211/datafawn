@@ -8,7 +8,8 @@ from datafawn.pipeline import (
     EventDetectionPipeline,
     PoseEstimator,
     Postprocessor,
-    EventExtractor
+    EventExtractor ,
+    SoundScapeGenerator
 )
 
 from datafawn.pose_estimators import (
@@ -22,6 +23,10 @@ from datafawn.postprocessors import (
 
 from datafawn.event_extractors import (
     ZeniExtractor
+)
+
+from datafawn.soundscape_gen import (
+    SoundScapeFromConfig
 )
 
 from datafawn.vis import (
@@ -40,6 +45,8 @@ __all__ = [
     'ErrorPostprocessor',
 
     'ZeniExtractor',
+
+    'SoundScapeFromConfig',
 
     'plot_bodyparts_position'
 ]
