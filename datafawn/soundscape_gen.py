@@ -5,97 +5,17 @@ These classes wrap existing functions to make them compatible with the pipeline.
 """
 
 from typing import Dict, Any, Optional, Union
-import pandas as pd
 from pathlib import Path
-import json
-import sys
-import moviepy
 from moviepy.video.io.VideoFileClip import VideoFileClip
 from moviepy.audio.io.AudioFileClip import AudioFileClip
 from moviepy.audio.AudioClip import CompositeAudioClip
 
 from datafawn.pipeline import SoundScapeGenerator
-
-
-def frame_to_timestamp(frame_number, fps):
-    """Convert frame number to timestamp in seconds."""
-    return frame_number / fps
-
-def create_sound_clip(sound_path, duration, start_time, video_duration):
-    """
-    Create an audio clip from a sound file, positioned at a specific time.
-    Compatible with moviepy 2.x API (uses with_* methods).
-    
-    Parameters:
-    -----------
-    sound_path : str or Path
-        Path to the sound file (.wav, .mp3, etc.)
-    duration : float
-        Duration of the sound in seconds
-    start_time : float
-        When to start playing the sound (in seconds)
-    video_duration : float
-        Total duration of the video (to ensure sound doesn't exceed video)
-    
-    Returns:
-    --------
-    AudioFileClip or None
-        Audio clip positioned at start_time, or None if start_time > video_duration
-    """
-    if start_time >= video_duration:
-        return None
-    
-    # Load the sound file
-    sound_clip = AudioFileClip(str(sound_path))
-    
-    # Trim sound if it would exceed video duration
-    end_time = min(start_time + duration, video_duration)
-    actual_duration = end_time - start_time
-    
-    if actual_duration <= 0:
-        sound_clip.close()
-        return None
-    
-    # Trim sound to fit within video
-    # In moviepy 2.x, use with_subclip() or subclip() if available
-    if actual_duration < sound_clip.duration:
-        try:
-            # Try with_subclip first (moviepy 2.x style)
-            if hasattr(sound_clip, 'with_subclip'):
-                sound_clip = sound_clip.with_subclip(0, actual_duration)
-            # Fallback to subclip (moviepy 1.x, might still work in 2.x)
-            elif hasattr(sound_clip, 'subclip'):
-                sound_clip = sound_clip.subclip(0, actual_duration)
-            # If neither works, try setting duration directly
-            elif hasattr(sound_clip, 'with_duration'):
-                sound_clip = sound_clip.with_duration(actual_duration)
-            else:
-                # If no trimming method available, use full clip
-                # CompositeAudioClip will handle timing
-                pass
-        except (AttributeError, TypeError, ValueError) as e:
-            # If trimming fails, use full clip - CompositeAudioClip will handle it
-            pass
-    
-    # Position the clip at start_time - moviepy 2.x uses with_start()
-    try:
-        if hasattr(sound_clip, 'with_start'):
-            # moviepy 2.x
-            sound_clip = sound_clip.with_start(start_time)
-        elif hasattr(sound_clip, 'set_start'):
-            # moviepy 1.x
-            sound_clip = sound_clip.set_start(start_time)
-        else:
-            # Fallback: try setting start attribute directly
-            sound_clip.start = start_time
-    except (AttributeError, TypeError) as e:
-        # If positioning fails, try setting attribute directly
-        try:
-            sound_clip.start = start_time
-        except:
-            raise RuntimeError(f"Could not position audio clip at {start_time}s. MoviePy version may be incompatible.") from e
-    
-    return sound_clip
+from datafawn.soundscape import (
+    frame_to_timestamp,
+    create_backing_track,
+    create_sound_clip,
+)
 
 
 class SoundScapeFromConfig(SoundScapeGenerator):
@@ -143,6 +63,12 @@ class SoundScapeFromConfig(SoundScapeGenerator):
             Path to the output video file
         """
         event_sound_map = self.soundscape_config['event_sound_map']
+        backing_track = self.soundscape_config['backing_track']
+        # Get volume settings from config, with defaults
+        volume_config = self.soundscape_config.get('volume', {})
+        backing_volume = volume_config.get('backing_track', 1.0)
+        event_sounds_volume = volume_config.get('event_sounds', 1.0)
+        original_video_volume = volume_config.get('original_video', 1.0)
 
         input_video_path = Path(input_video_path)
         
@@ -198,7 +124,7 @@ class SoundScapeFromConfig(SoundScapeGenerator):
                 # Create audio clips for each strike
                 event_audio_clips = []
                 for strike_time in strike_times:
-                    clip = create_sound_clip(sound_path, sound_duration, strike_time, video.duration)
+                    clip = create_sound_clip(sound_path, sound_duration, strike_time, video.duration, volume=event_sounds_volume)
                     if clip is not None:
                         event_audio_clips.append(clip)
                 
@@ -207,29 +133,44 @@ class SoundScapeFromConfig(SoundScapeGenerator):
         
         print(f"\nTotal audio clips created: {len(all_audio_clips)}")
         
-        # Combine all strike sounds with the original video audio
+        # Prepare backing track if provided
+        backing_track_clip = None
+        if backing_track:
+            print(f"\n{'='*60}")
+            print("Processing backing track")
+            print(f"{'='*60}")
+            backing_track_clip = create_backing_track(backing_track, video.duration, volume=backing_volume)
+        
+        # Combine all audio sources: backing track, original video audio, and strike sounds
+        audio_clips_to_composite = []
+        
+        # Add backing track first (lowest layer)
+        if backing_track_clip is not None:
+            audio_clips_to_composite.append(backing_track_clip)
+        
+        # Add original video audio if present
         if video.audio is not None:
-            # Composite the original audio with all strike sounds
-            final_audio = CompositeAudioClip([video.audio] + all_audio_clips)
+            original_audio = video.audio
+            # Apply volume adjustment if needed
+            if original_video_volume != 1.0:
+                original_audio = original_audio.with_volume_scaled(original_video_volume)
+                print(f"Original video audio volume set to {original_video_volume * 100:.0f}%")
+            audio_clips_to_composite.append(original_audio)
         else:
-            # No original audio, just use the strike sounds
-            if len(all_audio_clips) > 0:
-                final_audio = CompositeAudioClip(all_audio_clips)
-            else:
-                final_audio = None
+            print("No original video audio found, skipping...")
+        
+        # Add all strike sounds
+        audio_clips_to_composite.extend(all_audio_clips)
+        
+        # Create final composite audio
+        if len(audio_clips_to_composite) > 0:
+            final_audio = CompositeAudioClip(audio_clips_to_composite)
+        else:
+            final_audio = None
         
         # Set the audio to the video
-        # MoviePy 2.x uses with_audio, older versions use set_audio
         if final_audio is not None:
-            if hasattr(video, 'with_audio'):
-                final_video = video.with_audio(final_audio)
-            elif hasattr(video, 'set_audio'):
-                final_video = video.set_audio(final_audio)
-            else:
-                raise AttributeError(
-                    f"VideoFileClip has neither 'with_audio' nor 'set_audio' method. "
-                    f"MoviePy version may be incompatible."
-                )
+            final_video = video.with_audio(final_audio)
         else:
             final_video = video
         
@@ -252,6 +193,8 @@ class SoundScapeFromConfig(SoundScapeGenerator):
         video.close()
         for clip in all_audio_clips:
             clip.close()
+        if backing_track_clip is not None:
+            backing_track_clip.close()
         
         print(f"Done! Output saved to: {output_path}")
         return str(output_path)
