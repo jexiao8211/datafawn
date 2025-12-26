@@ -26,7 +26,8 @@ from datafawn.event_extractors import (
 )
 
 from datafawn.soundscape_gen import (
-    SoundScapeFromConfig
+    SoundScapeFromConfig,
+    SoundScapeAuto
 )
 
 from datafawn.vis import (
@@ -47,6 +48,7 @@ __all__ = [
     'ZeniExtractor',
 
     'SoundScapeFromConfig',
+    'SoundScapeAuto',
 
     'plot_bodyparts_position'
 ]

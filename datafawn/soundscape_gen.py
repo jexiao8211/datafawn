@@ -4,166 +4,25 @@ Concrete implementations for the event detection pipeline.
 These classes wrap existing functions to make them compatible with the pipeline.
 """
 
+from ast import Pass
 from typing import Dict, Any, Optional, Union
 from pathlib import Path
-from moviepy.video.io.VideoFileClip import VideoFileClip
-from moviepy.audio.io.AudioFileClip import AudioFileClip
-from moviepy.audio.AudioClip import CompositeAudioClip
 
 from datafawn.pipeline import SoundScapeGenerator
-import numpy as np
-import math
+from datafawn.soundscape.soundscape_from_config import generate_soundscape_from_config
+from datafawn.soundscape.soundscape_auto import soundscape_auto
 
-from datafawn.soundscape import (
-    frame_to_timestamp,
-    create_backing_track,
-    create_sound_clip,
-)
-
-def frame_to_timestamp(frame_number, fps):
-    """Convert frame number to timestamp in seconds."""
-    return frame_number / fps
-
-
-
-def get_speed_from_zeni(results : dict = {}, window : int = 30):
-    '''
-    Label frames in video based on how fast the animal is running at that time
-
-    Parameters
-    ------------
-
-    results : dict
-        Output from zeni algorithm
-
-    window : int 
-        Number of frames for window
-
-    '''
-    if 'events' not in results:
-        raise ValueError("Please enter in a valid results_ dictionary")
-    
-
-    foot_falls = []
-    for (scorer, individual), event_dict in results['events'].items():
-        for foot, frames in event_dict.items():
-            for frame in frames : 
-                foot_falls.append(frame)
-    
-    foot_falls.sort()
-    all_frames = np.zeros(shape=(foot_falls[-1] + 1), dtype=float)
-
-    num_windows = math.ceil(len(all_frames) / window)
-
-    highest_foot_falls_per_window = 0
-    for i in range (num_windows):
-        count = sum((i * window) <= x <= (i * window + window) for x in foot_falls)
-        if count > highest_foot_falls_per_window:
-            highest_foot_falls_per_window = count
-
-    for i in range (num_windows):
-        count = sum((i * window) <= x <= (i * window + window) for x in foot_falls)
-        for f in foot_falls:
-            if (i * window) <= f and f <= (i * window + window):
-                all_frames[f] = count/highest_foot_falls_per_window
-    
-    # all_frames[frame] = 0 if there is no foot fall at that frame
-    # all_frames[frame] != 0 if there is a foot fall at that frame
-    # should be a value between 0 and 1
-    # 1 meaning that the animal is moving at it's fastest
-    # 0 meaning the animal is moving at it's slowest
-    return all_frames
-
-
-
-
-def create_sound_clip(sound_path, duration, start_time, video_duration):
+class SoundScapeAuto(SoundScapeGenerator):
     """
-    Create an audio clip from a sound file, positioned at a specific time.
-    Compatible with moviepy 2.x API (uses with_* methods).
+    Soundscape generator that creates audio overlays from event data based on configuration.
     
-    Parameters:
-    -----------
-    sound_path : str or Path
-        Path to the sound file (.wav, .mp3, etc.)
-    duration : float
-        Duration of the sound in seconds
-    start_time : float
-        When to start playing the sound (in seconds)
-    video_duration : float
-        Total duration of the video (to ensure sound doesn't exceed video)
-    
-    Returns:
-    --------
-    AudioFileClip or None
-        Audio clip positioned at start_time, or None if start_time > video_duration
-    """
-    if start_time >= video_duration:
-        return None
-    
-    # Load the sound file
-    sound_clip = AudioFileClip(str(sound_path))
-    
-    # Trim sound if it would exceed video duration
-    end_time = min(start_time + duration, video_duration)
-    actual_duration = end_time - start_time
-    
-    if actual_duration <= 0:
-        sound_clip.close()
-        return None
-    
-    # Trim sound to fit within video
-    # In moviepy 2.x, use with_subclip() or subclip() if available
-    if actual_duration < sound_clip.duration:
-        try:
-            # Try with_subclip first (moviepy 2.x style)
-            if hasattr(sound_clip, 'with_subclip'):
-                sound_clip = sound_clip.with_subclip(0, actual_duration)
-            # Fallback to subclip (moviepy 1.x, might still work in 2.x)
-            elif hasattr(sound_clip, 'subclip'):
-                sound_clip = sound_clip.subclip(0, actual_duration)
-            # If neither works, try setting duration directly
-            elif hasattr(sound_clip, 'with_duration'):
-                sound_clip = sound_clip.with_duration(actual_duration)
-            else:
-                # If no trimming method available, use full clip
-                # CompositeAudioClip will handle timing
-                pass
-        except (AttributeError, TypeError, ValueError) as e:
-            # If trimming fails, use full clip - CompositeAudioClip will handle it
-            pass
-    
-    # Position the clip at start_time - moviepy 2.x uses with_start()
-    try:
-        if hasattr(sound_clip, 'with_start'):
-            # moviepy 2.x
-            sound_clip = sound_clip.with_start(start_time)
-        elif hasattr(sound_clip, 'set_start'):
-            # moviepy 1.x
-            sound_clip = sound_clip.set_start(start_time)
-        else:
-            # Fallback: try setting start attribute directly
-            sound_clip.start = start_time
-    except (AttributeError, TypeError) as e:
-        # If positioning fails, try setting attribute directly
-        try:
-            sound_clip.start = start_time
-        except:
-            raise RuntimeError(f"Could not position audio clip at {start_time}s. MoviePy version may be incompatible.") from e
-    
-    return sound_clip
-
-
-class SoundScapeFromConfig(SoundScapeGenerator):
-    """
+    Wraps the generate_soundscape_from_config function.
     """
 
     def __init__(
         self, 
-        soundscape_config: Dict[str, Any],
     ):
-        self.soundscape_config = soundscape_config
-
+        pass
     
     def generate(
         self, 
@@ -177,7 +36,7 @@ class SoundScapeFromConfig(SoundScapeGenerator):
         Iterates through all individuals and adds sounds for each event type
         based on the event_sound_map in the config.
         
-        Parameters:
+        Parameters
         -----------
         input_video_path : str or Path
             Path to input video file
@@ -193,325 +52,79 @@ class SoundScapeFromConfig(SoundScapeGenerator):
         output_path : str or Path, optional
             Path for output video. If None, generates default path.
         
-        Returns:
-        --------
+        Returns
+        -------
         str
             Path to the output video file
         """
-        event_sound_map = self.soundscape_config['event_sound_map']
-        backing_track = self.soundscape_config['backing_track']
-        # Get volume settings from config, with defaults
-        volume_config = self.soundscape_config.get('volume', {})
-        backing_volume = volume_config.get('backing_track', 1.0)
-        event_sounds_volume = volume_config.get('event_sounds', 1.0)
-        original_video_volume = volume_config.get('original_video', 1.0)
-
-        input_video_path = Path(input_video_path)
-        
-        if not input_video_path.exists():
-            raise FileNotFoundError(f"Input Video file not found: {input_video_path}")
-        
-        # Load video
-        print(f"Loading video: {input_video_path}")
-        video = VideoFileClip(str(input_video_path))
-        
-        # Get FPS
-        video_fps = video.fps
-        print(f"Video FPS: {video_fps}")
-        print(f"Video duration: {video.duration:.2f} seconds")
-        
-        # Create audio clips for all events from all individuals
-        all_audio_clips = []
-        
-        # Iterate through all individuals
-        for (scorer, individual), event_dict in events_dict.items():
-            print(f"\n{'='*60}")
-            print(f"Processing individual: {individual} (scorer: {scorer})")
-            print(f"{'='*60}")
-            
-            # Iterate through each event type for this individual
-            for event_name, strike_frames in event_dict.items():
-                # Check if this event type has a sound mapped
-                if event_name not in event_sound_map:
-                    print(f"  Skipping {event_name}: no sound file mapped")
-                    continue
-                
-                sound_path = Path(event_sound_map[event_name])
-                if not sound_path.exists():
-                    raise FileNotFoundError(f"Sound file not found for {event_name}: {sound_path}")
-                
-                print(f"\n  Processing {event_name}:")
-                if len(strike_frames) == 0:
-                    print(f"    No strikes found for {event_name}, skipping...")
-                    continue
-
-                print(f"    Found {len(strike_frames)} strikes")
-                
-                # Convert frame numbers to timestamps
-                strike_times = [frame_to_timestamp(frame, video_fps) for frame in strike_frames]
-                print(f"    Strike timestamps: {[f'{t:.2f}s' for t in strike_times[:3]]}..." if len(strike_times) > 3 else f"    Strike timestamps: {[f'{t:.2f}s' for t in strike_times]}")
-                
-                # Load sound file to get its duration
-                sound_clip_template = AudioFileClip(str(sound_path))
-                sound_duration = sound_clip_template.duration
-                sound_clip_template.close()
-                print(f"    Sound duration: {sound_duration:.2f} seconds")
-                
-                # Create audio clips for each strike
-                event_audio_clips = []
-                for strike_time in strike_times:
-                    clip = create_sound_clip(sound_path, sound_duration, strike_time, video.duration, volume=event_sounds_volume)
-                    if clip is not None:
-                        event_audio_clips.append(clip)
-                
-                print(f"    Created {len(event_audio_clips)} audio clips for {event_name}")
-                all_audio_clips.extend(event_audio_clips)
-        
-        print(f"\nTotal audio clips created: {len(all_audio_clips)}")
-        
-        # Prepare backing track if provided
-        backing_track_clip = None
-        if backing_track:
-            print(f"\n{'='*60}")
-            print("Processing backing track")
-            print(f"{'='*60}")
-            backing_track_clip = create_backing_track(backing_track, video.duration, volume=backing_volume)
-        
-        # Combine all audio sources: backing track, original video audio, and strike sounds
-        audio_clips_to_composite = []
-        
-        # Add backing track first (lowest layer)
-        if backing_track_clip is not None:
-            audio_clips_to_composite.append(backing_track_clip)
-        
-        # Add original video audio if present
-        if video.audio is not None:
-            original_audio = video.audio
-            # Apply volume adjustment if needed
-            if original_video_volume != 1.0:
-                original_audio = original_audio.with_volume_scaled(original_video_volume)
-                print(f"Original video audio volume set to {original_video_volume * 100:.0f}%")
-            audio_clips_to_composite.append(original_audio)
-        else:
-            print("No original video audio found, skipping...")
-        
-        # Add all strike sounds
-        audio_clips_to_composite.extend(all_audio_clips)
-        
-        # Create final composite audio
-        if len(audio_clips_to_composite) > 0:
-            final_audio = CompositeAudioClip(audio_clips_to_composite)
-        else:
-            final_audio = None
-        
-        # Set the audio to the video
-        if final_audio is not None:
-            final_video = video.with_audio(final_audio)
-        else:
-            final_video = video
-        
-        if output_path is None:
-            output_path = input_video_path.parent / f"{input_video_path.stem}_with_sounds.mp4"
-        else:
-            output_path = Path(output_path)
-        
-        # Write the final video
-        print(f"\nWriting output video to: {output_path}")
-        final_video.write_videofile(
-            str(output_path),
-            codec='libx264',
-            audio_codec='aac',
-            fps=video_fps
+        return soundscape_auto(
+            input_video_path=input_video_path,
+            events_dict=events_dict,
+            output_path=output_path
         )
-        
-        # Clean up
-        final_video.close()
-        video.close()
-        for clip in all_audio_clips:
-            clip.close()
-        if backing_track_clip is not None:
-            backing_track_clip.close()
-        
-        print(f"Done! Output saved to: {output_path}")
-        return str(output_path)
 
-# class SoundScapeFromConfig(SoundScapeGenerator):
-#     """
-#     """
 
-#     def __init__(
-#         self, 
-#         soundscape_config: Dict[str, Any],
-#     ):
-#         self.soundscape_config = soundscape_config
+class SoundScapeFromConfig(SoundScapeGenerator):
+    """
+    Soundscape generator that creates audio overlays from event data based on configuration.
+    
+    Wraps the generate_soundscape_from_config function.
+    """
+
+    def __init__(
+        self, 
+        soundscape_config: Dict[str, Any],
+    ):
+        """
+        Initialize the SoundScapeFromConfig generator.
+        
+        Parameters
+        -----------
+        soundscape_config : Dict[str, Any]
+            Configuration dictionary containing:
+            - 'event_sound_map': Dict mapping event names to sound file paths
+            - 'backing_track': Optional path to backing track audio file
+            - 'volume': Optional dict with 'backing_track', 'event_sounds', 'original_video' keys
+        """
+        self.soundscape_config = soundscape_config
 
     
-#     def generate(
-#         self, 
-#         input_video_path: Union[str, Path], 
-#         events_dict: Dict[str, Any], 
-#         output_path: Optional[Union[str, Path]] = None
-#     ) -> str:
-#         """
-#         Add sounds for detected events to a video.
+    def generate(
+        self, 
+        input_video_path: Union[str, Path], 
+        events_dict: Dict[str, Any], 
+        output_path: Optional[Union[str, Path]] = None
+    ) -> str:
+        """
+        Add sounds for detected events to a video.
         
-#         Iterates through all individuals and adds sounds for each event type
-#         based on the event_sound_map in the config.
+        Iterates through all individuals and adds sounds for each event type
+        based on the event_sound_map in the config.
         
-#         Parameters:
-#         -----------
-#         input_video_path : str or Path
-#             Path to input video file
-#         events_dict : Dict
-#             Dictionary of events from the pipeline.
-#             Structure: {(scorer, individual): {event_type: [frame_numbers]}}
-#             Example: {
-#                 ('scorer1', 'animal0'): {
-#                     'front_left_paw_strike': [10, 50, 90],
-#                     'back_right_paw_strike': [30, 70, 110]
-#                 }
-#             }
-#         output_path : str or Path, optional
-#             Path for output video. If None, generates default path.
+        Parameters
+        -----------
+        input_video_path : str or Path
+            Path to input video file
+        events_dict : Dict
+            Dictionary of events from the pipeline.
+            Structure: {(scorer, individual): {event_type: [frame_numbers]}}
+            Example: {
+                ('scorer1', 'animal0'): {
+                    'front_left_paw_strike': [10, 50, 90],
+                    'back_right_paw_strike': [30, 70, 110]
+                }
+            }
+        output_path : str or Path, optional
+            Path for output video. If None, generates default path.
         
-#         Returns:
-#         --------
-#         str
-#             Path to the output video file
-#         """
-#         event_sound_map = self.soundscape_config['event_sound_map']
-#         backing_track = self.soundscape_config['backing_track']
-#         # Get volume settings from config, with defaults
-#         volume_config = self.soundscape_config.get('volume', {})
-#         backing_volume = volume_config.get('backing_track', 1.0)
-#         event_sounds_volume = volume_config.get('event_sounds', 1.0)
-#         original_video_volume = volume_config.get('original_video', 1.0)
-
-#         input_video_path = Path(input_video_path)
-        
-#         if not input_video_path.exists():
-#             raise FileNotFoundError(f"Input Video file not found: {input_video_path}")
-        
-#         # Load video
-#         print(f"Loading video: {input_video_path}")
-#         video = VideoFileClip(str(input_video_path))
-        
-#         # Get FPS
-#         video_fps = video.fps
-#         print(f"Video FPS: {video_fps}")
-#         print(f"Video duration: {video.duration:.2f} seconds")
-        
-#         # Create audio clips for all events from all individuals
-#         all_audio_clips = []
-        
-#         # Iterate through all individuals
-#         for (scorer, individual), event_dict in events_dict.items():
-#             print(f"\n{'='*60}")
-#             print(f"Processing individual: {individual} (scorer: {scorer})")
-#             print(f"{'='*60}")
-            
-#             # Iterate through each event type for this individual
-#             for event_name, strike_frames in event_dict.items():
-#                 # Check if this event type has a sound mapped
-#                 if event_name not in event_sound_map:
-#                     print(f"  Skipping {event_name}: no sound file mapped")
-#                     continue
-                
-#                 sound_path = Path(event_sound_map[event_name])
-#                 if not sound_path.exists():
-#                     raise FileNotFoundError(f"Sound file not found for {event_name}: {sound_path}")
-                
-#                 print(f"\n  Processing {event_name}:")
-#                 if len(strike_frames) == 0:
-#                     print(f"    No strikes found for {event_name}, skipping...")
-#                     continue
-
-#                 print(f"    Found {len(strike_frames)} strikes")
-                
-#                 # Convert frame numbers to timestamps
-#                 strike_times = [frame_to_timestamp(frame, video_fps) for frame in strike_frames]
-#                 print(f"    Strike timestamps: {[f'{t:.2f}s' for t in strike_times[:3]]}..." if len(strike_times) > 3 else f"    Strike timestamps: {[f'{t:.2f}s' for t in strike_times]}")
-                
-#                 # Load sound file to get its duration
-#                 sound_clip_template = AudioFileClip(str(sound_path))
-#                 sound_duration = sound_clip_template.duration
-#                 sound_clip_template.close()
-#                 print(f"    Sound duration: {sound_duration:.2f} seconds")
-                
-#                 # Create audio clips for each strike
-#                 event_audio_clips = []
-#                 for strike_time in strike_times:
-#                     clip = create_sound_clip(sound_path, sound_duration, strike_time, video.duration, volume=event_sounds_volume)
-#                     if clip is not None:
-#                         event_audio_clips.append(clip)
-                
-#                 print(f"    Created {len(event_audio_clips)} audio clips for {event_name}")
-#                 all_audio_clips.extend(event_audio_clips)
-        
-#         print(f"\nTotal audio clips created: {len(all_audio_clips)}")
-        
-#         # Prepare backing track if provided
-#         backing_track_clip = None
-#         if backing_track:
-#             print(f"\n{'='*60}")
-#             print("Processing backing track")
-#             print(f"{'='*60}")
-#             backing_track_clip = create_backing_track(backing_track, video.duration, volume=backing_volume)
-        
-#         # Combine all audio sources: backing track, original video audio, and strike sounds
-#         audio_clips_to_composite = []
-        
-#         # Add backing track first (lowest layer)
-#         if backing_track_clip is not None:
-#             audio_clips_to_composite.append(backing_track_clip)
-        
-#         # Add original video audio if present
-#         if video.audio is not None:
-#             original_audio = video.audio
-#             # Apply volume adjustment if needed
-#             if original_video_volume != 1.0:
-#                 original_audio = original_audio.with_volume_scaled(original_video_volume)
-#                 print(f"Original video audio volume set to {original_video_volume * 100:.0f}%")
-#             audio_clips_to_composite.append(original_audio)
-#         else:
-#             print("No original video audio found, skipping...")
-        
-#         # Add all strike sounds
-#         audio_clips_to_composite.extend(all_audio_clips)
-        
-#         # Create final composite audio
-#         if len(audio_clips_to_composite) > 0:
-#             final_audio = CompositeAudioClip(audio_clips_to_composite)
-#         else:
-#             final_audio = None
-        
-#         # Set the audio to the video
-#         if final_audio is not None:
-#             final_video = video.with_audio(final_audio)
-#         else:
-#             final_video = video
-        
-#         if output_path is None:
-#             output_path = input_video_path.parent / f"{input_video_path.stem}_with_sounds.mp4"
-#         else:
-#             output_path = Path(output_path)
-        
-#         # Write the final video
-#         print(f"\nWriting output video to: {output_path}")
-#         final_video.write_videofile(
-#             str(output_path),
-#             codec='libx264',
-#             audio_codec='aac',
-#             fps=video_fps
-#         )
-        
-#         # Clean up
-#         final_video.close()
-#         video.close()
-#         for clip in all_audio_clips:
-#             clip.close()
-#         if backing_track_clip is not None:
-#             backing_track_clip.close()
-        
-#         print(f"Done! Output saved to: {output_path}")
-#         return str(output_path)
+        Returns
+        -------
+        str
+            Path to the output video file
+        """
+        return generate_soundscape_from_config(
+            input_video_path=input_video_path,
+            events_dict=events_dict,
+            soundscape_config=self.soundscape_config,
+            output_path=output_path
+        )
