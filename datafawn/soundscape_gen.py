@@ -15,11 +15,65 @@ from moviepy.audio.io.AudioFileClip import AudioFileClip
 from moviepy.audio.AudioClip import CompositeAudioClip
 
 from datafawn.pipeline import SoundScapeGenerator
-
+import numpy as np
+import math
 
 def frame_to_timestamp(frame_number, fps):
     """Convert frame number to timestamp in seconds."""
     return frame_number / fps
+
+
+
+def get_speed_from_zeni(results : dict = {}, window : int = 30):
+    '''
+    Label frames in video based on how fast the animal is running at that time
+
+    Parameters
+    ------------
+
+    results : dict
+        Output from zeni algorithm
+
+    window : int 
+        Number of frames for window
+
+    '''
+    if 'events' not in results:
+        raise ValueError("Please enter in a valid results_ dictionary")
+    
+
+    foot_falls = []
+    for (scorer, individual), event_dict in results['events'].items():
+        for foot, frames in event_dict.items():
+            for frame in frames : 
+                foot_falls.append(frame)
+    
+    foot_falls.sort()
+    all_frames = np.zeros(shape=(foot_falls[-1] + 1), dtype=float)
+
+    num_windows = math.ceil(len(all_frames) / window)
+
+    highest_foot_falls_per_window = 0
+    for i in range (num_windows):
+        count = sum((i * window) <= x <= (i * window + window) for x in foot_falls)
+        if count > highest_foot_falls_per_window:
+            highest_foot_falls_per_window = count
+
+    for i in range (num_windows):
+        count = sum((i * window) <= x <= (i * window + window) for x in foot_falls)
+        for f in foot_falls:
+            if (i * window) <= f and f <= (i * window + window):
+                all_frames[f] = count/highest_foot_falls_per_window
+    
+    # all_frames[frame] = 0 if there is no foot fall at that frame
+    # all_frames[frame] != 0 if there is a foot fall at that frame
+    # should be a value between 0 and 1
+    # 1 meaning that the animal is moving at it's fastest
+    # 0 meaning the animal is moving at it's slowest
+    return all_frames
+
+
+
 
 def create_sound_clip(sound_path, duration, start_time, video_duration):
     """
