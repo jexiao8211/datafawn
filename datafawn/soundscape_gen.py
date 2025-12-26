@@ -11,11 +11,147 @@ from moviepy.audio.io.AudioFileClip import AudioFileClip
 from moviepy.audio.AudioClip import CompositeAudioClip
 
 from datafawn.pipeline import SoundScapeGenerator
+import numpy as np
+import math
+
 from datafawn.soundscape import (
     frame_to_timestamp,
     create_backing_track,
     create_sound_clip,
 )
+
+def frame_to_timestamp(frame_number, fps):
+    """Convert frame number to timestamp in seconds."""
+    return frame_number / fps
+
+
+
+def get_speed_from_zeni(results : dict = {}, window : int = 30):
+    '''
+    Label frames in video based on how fast the animal is running at that time
+
+    Parameters
+    ------------
+
+    results : dict
+        Output from zeni algorithm
+
+    window : int 
+        Number of frames for window
+
+    '''
+    if 'events' not in results:
+        raise ValueError("Please enter in a valid results_ dictionary")
+    
+
+    foot_falls = []
+    for (scorer, individual), event_dict in results['events'].items():
+        for foot, frames in event_dict.items():
+            for frame in frames : 
+                foot_falls.append(frame)
+    
+    foot_falls.sort()
+    all_frames = np.zeros(shape=(foot_falls[-1] + 1), dtype=float)
+
+    num_windows = math.ceil(len(all_frames) / window)
+
+    highest_foot_falls_per_window = 0
+    for i in range (num_windows):
+        count = sum((i * window) <= x <= (i * window + window) for x in foot_falls)
+        if count > highest_foot_falls_per_window:
+            highest_foot_falls_per_window = count
+
+    for i in range (num_windows):
+        count = sum((i * window) <= x <= (i * window + window) for x in foot_falls)
+        for f in foot_falls:
+            if (i * window) <= f and f <= (i * window + window):
+                all_frames[f] = count/highest_foot_falls_per_window
+    
+    # all_frames[frame] = 0 if there is no foot fall at that frame
+    # all_frames[frame] != 0 if there is a foot fall at that frame
+    # should be a value between 0 and 1
+    # 1 meaning that the animal is moving at it's fastest
+    # 0 meaning the animal is moving at it's slowest
+    return all_frames
+
+
+
+
+def create_sound_clip(sound_path, duration, start_time, video_duration):
+    """
+    Create an audio clip from a sound file, positioned at a specific time.
+    Compatible with moviepy 2.x API (uses with_* methods).
+    
+    Parameters:
+    -----------
+    sound_path : str or Path
+        Path to the sound file (.wav, .mp3, etc.)
+    duration : float
+        Duration of the sound in seconds
+    start_time : float
+        When to start playing the sound (in seconds)
+    video_duration : float
+        Total duration of the video (to ensure sound doesn't exceed video)
+    
+    Returns:
+    --------
+    AudioFileClip or None
+        Audio clip positioned at start_time, or None if start_time > video_duration
+    """
+    if start_time >= video_duration:
+        return None
+    
+    # Load the sound file
+    sound_clip = AudioFileClip(str(sound_path))
+    
+    # Trim sound if it would exceed video duration
+    end_time = min(start_time + duration, video_duration)
+    actual_duration = end_time - start_time
+    
+    if actual_duration <= 0:
+        sound_clip.close()
+        return None
+    
+    # Trim sound to fit within video
+    # In moviepy 2.x, use with_subclip() or subclip() if available
+    if actual_duration < sound_clip.duration:
+        try:
+            # Try with_subclip first (moviepy 2.x style)
+            if hasattr(sound_clip, 'with_subclip'):
+                sound_clip = sound_clip.with_subclip(0, actual_duration)
+            # Fallback to subclip (moviepy 1.x, might still work in 2.x)
+            elif hasattr(sound_clip, 'subclip'):
+                sound_clip = sound_clip.subclip(0, actual_duration)
+            # If neither works, try setting duration directly
+            elif hasattr(sound_clip, 'with_duration'):
+                sound_clip = sound_clip.with_duration(actual_duration)
+            else:
+                # If no trimming method available, use full clip
+                # CompositeAudioClip will handle timing
+                pass
+        except (AttributeError, TypeError, ValueError) as e:
+            # If trimming fails, use full clip - CompositeAudioClip will handle it
+            pass
+    
+    # Position the clip at start_time - moviepy 2.x uses with_start()
+    try:
+        if hasattr(sound_clip, 'with_start'):
+            # moviepy 2.x
+            sound_clip = sound_clip.with_start(start_time)
+        elif hasattr(sound_clip, 'set_start'):
+            # moviepy 1.x
+            sound_clip = sound_clip.set_start(start_time)
+        else:
+            # Fallback: try setting start attribute directly
+            sound_clip.start = start_time
+    except (AttributeError, TypeError) as e:
+        # If positioning fails, try setting attribute directly
+        try:
+            sound_clip.start = start_time
+        except:
+            raise RuntimeError(f"Could not position audio clip at {start_time}s. MoviePy version may be incompatible.") from e
+    
+    return sound_clip
 
 
 class SoundScapeFromConfig(SoundScapeGenerator):
