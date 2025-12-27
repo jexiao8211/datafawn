@@ -13,93 +13,11 @@ from moviepy.video.io.VideoFileClip import VideoFileClip
 from moviepy.audio.io.AudioFileClip import AudioFileClip
 from moviepy.audio.AudioClip import CompositeAudioClip
 
-def audio_time_mirror(clip, file_path=None):
-    """
-    Reverse audio clip by flipping the audio array.
-    
-    Parameters
-    ----------
-    clip : AudioFileClip
-        The audio clip to reverse
-    file_path : str or Path, optional
-        Path to the audio file. If provided, reads directly from file
-        to bypass moviepy's reader issues with short clips.
-    
-    Returns
-    -------
-    AudioArrayClip
-        A new reversed audio clip
-    """
-    fps = clip.fps
-    
-    # Read the WAV file directly using scipy to bypass moviepy's reader issues
-    # This is more reliable for short clips and avoids the "t=1.00-1.00" error
-    if file_path is not None:
-        try:
-            from scipy.io import wavfile
-            sample_rate, audio_array = wavfile.read(str(file_path))
-            
-            # Convert to float32 if needed (wavfile.read returns int16 for most files)
-            if audio_array.dtype != np.float32:
-                if audio_array.dtype == np.int16:
-                    audio_array = audio_array.astype(np.float32) / 32768.0
-                elif audio_array.dtype == np.int32:
-                    audio_array = audio_array.astype(np.float32) / 2147483648.0
-                else:
-                    audio_array = audio_array.astype(np.float32)
-            
-            # Handle mono vs stereo
-            if len(audio_array.shape) == 1:
-                # Mono: add channel dimension
-                audio_array = audio_array[:, np.newaxis]
-            
-            # Reverse along time axis (axis 0)
-            reversed_array = np.flip(audio_array, axis=0).copy()
-            
-            # Create AudioArrayClip using the original clip's fps
-            from moviepy.audio.AudioClip import AudioArrayClip
-            return AudioArrayClip(reversed_array, fps=fps)
-            
-        except ImportError:
-            # scipy not available, fall through to moviepy method
-            pass
-        except Exception as e:
-            # If direct file read fails, fall through to moviepy method
-            print(f"Warning: Could not read file directly ({e}), using moviepy method")
-    
-    # Fallback: use moviepy (or if file_path not provided)
-    duration = clip.duration
-    if duration is None or duration <= 0:
-        raise ValueError(f"Invalid clip duration: {duration}")
-    
-    # Manually construct time array that's guaranteed to be within bounds
-    n_samples = int(np.ceil(duration * fps))
-    if n_samples <= 0:
-        raise ValueError(f"No samples to process: duration={duration}, fps={fps}")
-    
-    # Generate time points from 0 to just before duration
-    # Stay well within bounds to avoid edge issues
-    epsilon = max(1.0 / fps, 1e-6)  # At least one sample period
-    max_time = max(0, duration - epsilon)
-    tt = np.linspace(0, max_time, n_samples)
-    
-    # Double-check bounds
-    tt = np.clip(tt, 0, duration - 1e-6)
-    
-    audio_array = clip.get_frame(tt)
-    
-    if audio_array is None or len(audio_array) == 0:
-        raise ValueError("Could not extract audio array from clip")
-    
-    reversed_array = np.flip(audio_array, axis=0).copy()
-    
-    from moviepy.audio.AudioClip import AudioArrayClip
-    return AudioArrayClip(reversed_array, fps=fps)
-
-
 from datafawn.soundscape.audio_utils import (
     frame_to_timestamp,
     create_sound_clip,
+    audio_time_mirror,
+    create_backing_track_with_speed_scaling,
 )
 from datafawn.soundscape.event_utils import get_speed_from_zeni
 
@@ -110,7 +28,10 @@ def soundscape_auto(
     notes_folder: Union[str, Path] = "sounds/custom_tone",
     output_path: Optional[Union[str, Path]] = None,
     std_dev: float = 1.5,
-    speed_threshold: Optional[float] = 0.8
+    speed_threshold: Optional[float] = 0.8,
+    backing_track_path: Optional[Union[str, Path]] = 'sounds/calm_ambient_backing.wav',
+    backing_track_base_volume: float = 0.5,
+    backing_track_max_volume: float = 1.0
 ) -> str:
     """
     Generate a soundscape by automatically selecting notes based on movement speed.
@@ -144,6 +65,17 @@ def soundscape_auto(
         Speed threshold (0.0-1.0) for applying reverse effect. When speed
         crosses this threshold, the audio clip will be reversed. If None,
         no reverse effect is applied.
+    backing_track_path : str or Path, optional
+        Path to backing track audio file. If provided, the backing track volume
+        will be continuously scaled by the speed_array (louder when faster).
+    backing_track_base_volume : float, default=0.5
+        Minimum volume when speed is 0.0, relative to original sound level.
+        Default is 0.5 (50% of original volume). The backing track will be
+        quietest when the animal is stationary.
+    backing_track_max_volume : float, default=1.0
+        Maximum volume when speed is 1.0, relative to original sound level.
+        Default is 1.0 (100% of original volume). The backing track will be
+        loudest when the animal is moving at maximum speed.
     
     Returns
     -------
@@ -171,8 +103,6 @@ def soundscape_auto(
     
     # Define major scale notes for back feet (C5 to G6) and front feet (C6 to G7)
     # Major scale pattern: C, D, E, F, G, A, B repeated across octaves
-    # Back feet: C5, D5, E5, F5, G5, A5, B5, C6, D6, E6, F6, G6
-    # Front feet: C6, D6, E6, F6, G6, A6, B6, C7, D7, E7, F7, G7 (one octave higher)
     back_feet_notes = ["C5", "D5", "E5", "F5", "G5", "A5", "B5", "C6", "D6", "E6", "F6", "G6"]
     front_feet_notes = ["C6", "D6", "E6", "F6", "G6", "A6", "B6", "C7", "D7", "E7", "F7", "G7"]
     
@@ -209,6 +139,16 @@ def soundscape_auto(
     results_dict = {'events': events_dict}
     speed_array = get_speed_from_zeni(results_dict)
     print(f"Speed array calculated: {len(speed_array)} frames")
+    
+    # Debug output for speed_array
+    non_zero_count = np.count_nonzero(speed_array)
+    non_zero_percentage = (non_zero_count / len(speed_array)) * 100
+    speed_min = np.min(speed_array)
+    speed_max = np.max(speed_array)
+    speed_mean = np.mean(speed_array)
+    speed_std = np.std(speed_array)
+    print(f"Speed array stats: min={speed_min:.3f}, max={speed_max:.3f}, mean={speed_mean:.3f}, std={speed_std:.3f}")
+    print(f"Speed array: {non_zero_count}/{len(speed_array)} frames non-zero ({non_zero_percentage:.1f}%)")
     
     # Create audio clips for all events from all individuals
     all_audio_clips = []
@@ -297,23 +237,63 @@ def soundscape_auto(
     
     print(f"\nTotal audio clips created: {len(all_audio_clips)}")
     
-    # Combine all audio sources: original video audio and strike sounds
+    # Prepare backing track with speed scaling if provided
+    backing_track_clip = None
+    if backing_track_path is not None:
+        backing_track_path_obj = Path(backing_track_path)
+        if backing_track_path_obj.exists():
+            print(f"\n{'='*60}")
+            print("Processing backing track with speed-based volume scaling")
+            print(f"{'='*60}")
+            backing_track_clip = create_backing_track_with_speed_scaling(
+                backing_track_path=backing_track_path,
+                video_duration=video.duration,
+                speed_array=speed_array,
+                video_fps=video_fps,
+                base_volume=backing_track_base_volume,
+                max_volume=backing_track_max_volume
+            )
+        else:
+            print(f"Warning: Backing track file not found: {backing_track_path}, skipping...")
+    
+    # Combine all audio sources: backing track, original video audio, and strike sounds
     audio_clips_to_composite = []
+    
+    # Add backing track first (lowest layer)
+    if backing_track_clip is not None:
+        # Debug: verify backing track has audio
+        print(f"Backing track clip info: duration={backing_track_clip.duration:.2f}s, fps={backing_track_clip.fps}, nchannels={getattr(backing_track_clip, 'nchannels', 'unknown')}")
+        audio_clips_to_composite.append(backing_track_clip)
+        print(f"Added backing track to composite (total clips: {len(audio_clips_to_composite)})")
+    else:
+        print("No backing track clip to add")
     
     # Add original video audio if present
     if video.audio is not None:
         original_audio = video.audio
         audio_clips_to_composite.append(original_audio)
-        print("Original video audio included")
+        print(f"Original video audio included: duration={original_audio.duration:.2f}s")
     else:
         print("No original video audio found, skipping...")
     
     # Add all strike sounds
     audio_clips_to_composite.extend(all_audio_clips)
+    print(f"Added {len(all_audio_clips)} event audio clips to composite")
+    
+    # Debug: List all clips in composite
+    print(f"\n{'='*60}")
+    print(f"COMPOSITE DEBUG: Total clips to composite: {len(audio_clips_to_composite)}")
+    for i, clip in enumerate(audio_clips_to_composite):
+        clip_type = type(clip).__name__
+        clip_dur = getattr(clip, 'duration', 'unknown')
+        clip_start = getattr(clip, 'start', 0)
+        print(f"  Clip {i}: {clip_type}, duration={clip_dur}, start={clip_start}")
+    print(f"{'='*60}\n")
     
     # Create final composite audio
     if len(audio_clips_to_composite) > 0:
         final_audio = CompositeAudioClip(audio_clips_to_composite)
+        print(f"Created CompositeAudioClip: duration={final_audio.duration:.2f}s")
     else:
         final_audio = None
     
@@ -342,6 +322,8 @@ def soundscape_auto(
     video.close()
     for clip in all_audio_clips:
         clip.close()
+    if backing_track_clip is not None:
+        backing_track_clip.close()
     
     print(f"Done! Output saved to: {output_path}")
     return str(output_path)
