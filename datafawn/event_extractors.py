@@ -9,7 +9,7 @@ import pandas as pd
 from pathlib import Path
 
 from datafawn.pipeline import EventExtractor
-from event_extraction.zeni import zeni_algorithm
+from datafawn.event_extraction.zeni import zeni_algorithm
 
 
 class ZeniExtractor(EventExtractor):

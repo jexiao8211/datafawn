@@ -8,12 +8,12 @@ from datafawn.pipeline import Postprocessor
 import pandas as pd
 import numpy as np
 from typing import List, Optional, Dict, Any
-from postprocessing.error_mask import (
+from datafawn.postprocessing.error_mask import (
     detect_velocity_errors,
     detect_likelihood_errors,
     detect_distance_errors
 )
-from postprocessing.norm import paw_to_relative_position
+from datafawn.postprocessing.norm import paw_to_relative_position
 
 class ErrorPostprocessor(Postprocessor):
     """
