@@ -125,44 +125,31 @@ def create_backing_track(backing_track_path, video_duration, volume=1.0):
     backing_clip = AudioFileClip(str(backing_track_path))
     backing_duration = backing_clip.duration
     
-    print(f"Backing track duration: {backing_duration:.2f} seconds")
-    print(f"Video duration: {video_duration:.2f} seconds")
+    print(f"Loading backing track: {backing_duration:.2f}s")
     
     # If backing track is shorter, loop it
     if backing_duration < video_duration:
-        # Calculate how many times we need to loop
         num_loops = int(video_duration / backing_duration) + 1
-        print(f"Backing track is shorter, looping {num_loops} times")
-        
-        # Create list of clips to concatenate
+        print(f"  Looping {num_loops}x to match video")
         clips_to_loop = [backing_clip] * num_loops
-        
-        # Concatenate to create looped version
         try:
             looped_clip = concatenate_audioclips(clips_to_loop)
         except Exception as e:
-            # If concatenate fails, close the original clip and raise error
             backing_clip.close()
             raise RuntimeError(f"Could not loop backing track: {e}") from e
-        
-        # Close the original clip since we've created a new one
         backing_clip.close()
         backing_clip = looped_clip
     
     # If backing track is longer, crop it
     if backing_clip.duration > video_duration:
-        print(f"Backing track is longer, cropping to {video_duration:.2f} seconds")
-        original_clip = backing_clip
+        print(f"  Cropping to {video_duration:.2f}s")
         backing_clip = backing_clip.with_end(video_duration)
-        # Don't close original_clip here - subclipped clip may still need it
-        # It will be garbage collected when backing_clip is no longer referenced
     
     # Apply volume adjustment if needed
     if volume != 1.0:
         backing_clip = backing_clip.with_volume_scaled(volume)
-        print(f"Backing track volume set to {volume * 100:.0f}%")
+        print(f"  Volume: {volume * 100:.0f}%")
     
-    print(f"Final backing track duration: {backing_clip.duration:.2f} seconds")
     return backing_clip
 
 
@@ -172,14 +159,17 @@ def create_backing_track_with_speed_scaling(
     speed_array: np.ndarray,
     video_fps: float,
     base_volume: float = 0.5,
-    max_volume: float = 1.0
+    max_volume: float = 1.0,
+    speed_threshold: float = 0.8,
+    volume_curve: float = 3.0
 ):
     """
     Create a backing track audio clip with volume continuously scaled by speed_array.
     
     The volume of the backing track is scaled frame-by-frame based on the speed values
-    in speed_array. Higher speed values result in higher volume. The volume is linearly
-    interpolated from base_volume (when speed = 0.0) to max_volume (when speed = 1.0).
+    in speed_array. Higher speed values result in higher volume. Volume scaling uses
+    a power curve that keeps volume near base_volume until speed approaches the
+    threshold, then ramps up quickly to max_volume.
     
     Parameters:
     -----------
@@ -197,6 +187,16 @@ def create_backing_track_with_speed_scaling(
     max_volume : float, optional
         Maximum volume when speed is 1.0, relative to original sound level.
         Default is 1.0 (100% of original volume).
+    speed_threshold : float, optional
+        Speed value at which volume reaches max_volume. Speeds above this are clamped.
+        Default is 0.8.
+    volume_curve : float, optional
+        Power curve exponent for volume scaling. Higher values keep volume near
+        base_volume longer, only ramping up close to threshold.
+        - 1.0 = linear scaling
+        - 2.0 = quadratic (moderate curve)
+        - 3.0 = cubic (default, volume stays low until near threshold)
+        - 4.0+ = more extreme, volume stays very flat until very close to threshold
     
     Returns:
     --------
@@ -212,11 +212,10 @@ def create_backing_track_with_speed_scaling(
     
     # Read the backing track directly with scipy for accurate audio data
     # (MoviePy's get_frame() doesn't return proper audio waveforms)
-    print(f"Loading backing track from: {backing_track_path}")
+    print(f"Loading backing track: {backing_track_path}")
     sample_rate, raw_audio = wavfile.read(str(backing_track_path))
     backing_duration = len(raw_audio) / sample_rate
-    print(f"Raw audio from file: sample_rate={sample_rate}, shape={raw_audio.shape}, dtype={raw_audio.dtype}, duration={backing_duration:.2f}s")
-    print(f"Video duration: {video_duration:.2f} seconds")
+    print(f"  Duration: {backing_duration:.2f}s, Sample rate: {sample_rate}Hz")
     
     # Convert to float32 normalized to [-1.0, 1.0]
     if raw_audio.dtype == np.int16:
@@ -233,7 +232,6 @@ def create_backing_track_with_speed_scaling(
         audio_array = audio_array[:, np.newaxis]
     
     backing_fps = sample_rate
-    print(f"Converted audio: shape={audio_array.shape}, min={np.min(audio_array):.4f}, max={np.max(audio_array):.4f}")
     
     # Calculate how many samples we need for video duration
     n_samples_needed = int(np.round(video_duration * backing_fps))
@@ -241,13 +239,13 @@ def create_backing_track_with_speed_scaling(
     # If backing track is shorter than video, loop it
     if len(audio_array) < n_samples_needed:
         num_loops = (n_samples_needed // len(audio_array)) + 1
-        print(f"Looping audio {num_loops} times to match video duration")
+        print(f"  Looping {num_loops}x to match video duration")
         audio_array = np.tile(audio_array, (num_loops, 1))
+    elif backing_duration > video_duration:
+        print(f"  Cropping to {video_duration:.2f}s")
     
     # Crop to exact video duration
     audio_array = audio_array[:n_samples_needed]
-    print(f"Cropped audio to {len(audio_array)} samples ({video_duration:.2f}s)")
-    print(f"Audio stats after crop: min={np.min(audio_array):.4f}, max={np.max(audio_array):.4f}, mean={np.mean(audio_array):.4f}")
     
     # Calculate volume scaling for each audio sample
     # Generate time points for each sample
@@ -255,17 +253,23 @@ def create_backing_track_with_speed_scaling(
     frame_numbers = (sample_times * video_fps).astype(int)
     frame_numbers = np.clip(frame_numbers, 0, len(speed_array) - 1)
     
-    # Get speed values and map to volume
-    # Linear interpolation: speed 0.0 -> base_volume, speed 1.0 -> max_volume
-    # These are multipliers (can be > 1.0 for amplification)
+    # Map speed values to volume multipliers using power curve
+    # This keeps volume near base_volume until speed approaches threshold
     speed_values = speed_array[frame_numbers]
-    volume_multipliers = base_volume + speed_values * (max_volume - base_volume)
-    # Ensure non-negative
-    volume_multipliers = np.clip(volume_multipliers, 0.0, None)
     
-    # Debug: print volume statistics BEFORE applying
-    print(f"Volume multiplier stats: min={np.min(volume_multipliers):.3f}, max={np.max(volume_multipliers):.3f}, mean={np.mean(volume_multipliers):.3f}")
-    print(f"Original audio stats: min={np.min(audio_array):.3f}, max={np.max(audio_array):.3f}, mean={np.mean(np.abs(audio_array)):.3f}")
+    # Normalize speed relative to threshold (clamp at 1.0)
+    normalized_speed = np.clip(speed_values / speed_threshold, 0.0, 1.0)
+    
+    # Apply power curve: values stay low until approaching 1.0, then ramp up
+    # curve=1.0 is linear, curve=3.0 keeps volume flat until ~70% of threshold
+    curved_speed = np.power(normalized_speed, volume_curve)
+    
+    # Map curved values to volume range
+    volume_multipliers = base_volume + curved_speed * (max_volume - base_volume)
+    volume_multipliers = np.clip(volume_multipliers, 0.0, None)  # Ensure non-negative
+    
+    print(f"  Volume scaling: curve={volume_curve}, threshold={speed_threshold}")
+    print(f"  Volume range: {np.min(volume_multipliers):.2f}x - {np.max(volume_multipliers):.2f}x (mean: {np.mean(volume_multipliers):.2f}x)")
     
     # Apply volume scaling to audio array
     if audio_array.shape[1] >= 1:
@@ -273,64 +277,32 @@ def create_backing_track_with_speed_scaling(
     
     scaled_audio_array = audio_array * volume_multipliers
     
-    # Debug: print volume statistics AFTER applying
-    print(f"Scaled audio stats: min={np.min(scaled_audio_array):.3f}, max={np.max(scaled_audio_array):.3f}, mean={np.mean(np.abs(scaled_audio_array)):.3f}")
-    
-    # Check if audio is being completely muted
+    # Warn if audio is extremely quiet
     if np.max(np.abs(scaled_audio_array)) < 0.001:
-        print(f"WARNING: Scaled audio is extremely quiet (max={np.max(np.abs(scaled_audio_array)):.6f})!")
-        print(f"This suggests volume scaling may be too low or speed_array values are all zero.")
+        print(f"  WARNING: Audio is extremely quiet - check volume settings or speed_array")
     
     # Normalize audio to fit in [-1.0, 1.0] range for WAV file
-    # This preserves relative volume differences but prevents clipping
     max_abs_value = np.max(np.abs(scaled_audio_array))
     if max_abs_value > 1.0:
-        # Normalize to prevent clipping while preserving relative volumes
-        print(f"Normalizing audio (max={max_abs_value:.3f}) to fit in [-1.0, 1.0] range")
         scaled_audio_array = scaled_audio_array / max_abs_value
     else:
-        # No normalization needed, but ensure it's in valid range
         scaled_audio_array = np.clip(scaled_audio_array, -1.0, 1.0)
     
-    # Convert to int16 for WAV file
+    # Convert to int16 and write to temporary WAV file
     scaled_audio_int16 = (scaled_audio_array * 32767).astype(np.int16)
     
-    # Debug: check if audio has any signal
-    max_int16 = np.max(np.abs(scaled_audio_int16))
-    print(f"Audio int16 stats: max={max_int16}, should be > 0 for audible audio")
-    
-    # Write to temporary WAV file
     temp_file = tempfile.NamedTemporaryFile(suffix='.wav', delete=False)
     temp_path = temp_file.name
     temp_file.close()
     
     wavfile.write(temp_path, int(backing_fps), scaled_audio_int16)
-    print(f"Wrote scaled audio to temporary file: {temp_path}")
     
-    # VERIFY: Read the temp file back with scipy to confirm what's actually in it
-    verify_rate, verify_data = wavfile.read(temp_path)
-    print(f"VERIFICATION - Read temp file back: rate={verify_rate}, shape={verify_data.shape}, dtype={verify_data.dtype}")
-    print(f"VERIFICATION - Temp file stats: min={np.min(verify_data)}, max={np.max(verify_data)}, mean={np.mean(np.abs(verify_data)):.1f}")
-    
-    # Load the temporary file as AudioFileClip (which handles duration correctly)
+    # Load as AudioFileClip for proper duration handling
     scaled_clip = AudioFileClip(temp_path)
+    scaled_clip._temp_file_path = temp_path  # Store for cleanup
+    scaled_clip = scaled_clip.with_start(0)  # Ensure starts at time 0
     
-    # Verify the loaded clip has audio
-    test_audio = scaled_clip.get_frame([0.0, 0.1, 0.2])
-    print(f"Loaded clip test: got {len(test_audio)} samples, max abs value={np.max(np.abs(test_audio)):.6f}")
-    
-    # Store temp_path on the clip so we can clean it up later if needed
-    scaled_clip._temp_file_path = temp_path
-    
-    # Ensure the backing track starts at time 0
-    # This is important for CompositeAudioClip to position it correctly
-    scaled_clip = scaled_clip.with_start(0)
-    
-    print(f"Backing track volume scaled by speed_array:")
-    print(f"  - Base volume (speed=0.0): {base_volume:.2f}x (relative to original)")
-    print(f"  - Max volume (speed=1.0): {max_volume:.2f}x (relative to original)")
-    print(f"  - Volume range: {base_volume:.2f}x to {max_volume:.2f}x")
-    print(f"Final backing track: duration={scaled_clip.duration:.2f}s, start={getattr(scaled_clip, 'start', 'unknown')}")
+    print(f"  Speed-scaled backing track ready: {scaled_clip.duration:.2f}s")
     
     return scaled_clip
 

@@ -7,6 +7,74 @@ import math
 from typing import Dict, Any
 
 
+def get_speed_from_zeni_smooth(results: dict = {}, window: int = 30):
+    """
+    Calculate smooth relative running speed for each frame using a rolling window.
+    
+    Unlike get_speed_from_zeni, this function provides smooth, continuous speed
+    values by using a rolling window centered on each frame. Every frame gets a
+    speed value based on the footfall density in its surrounding window.
+    
+    Algorithm:
+    1. Extract all footfall frame numbers from all individuals and all feet
+    2. Create a binary array marking footfall frames
+    3. Apply a rolling sum (convolution) to count footfalls in each window
+    4. Normalize by the maximum count to get values between 0 and 1
+    
+    Parameters
+    ----------
+    results : dict
+        Output dictionary from Zeni algorithm. Must contain an 'events' key with
+        structure: {(scorer, individual): {foot_name: [frame_numbers]}}
+    window : int, default=30
+        Size of the rolling window in frames. Larger windows produce smoother
+        speed curves but less temporal precision.
+    
+    Returns
+    -------
+    numpy.ndarray
+        Array of shape (max_frame + 1,) where each element represents the
+        normalized speed (0.0 to 1.0) for that frame. Values transition smoothly
+        between frames.
+    """
+    if 'events' not in results:
+        raise ValueError("Please enter in a valid results_ dictionary")
+    
+    # Collect all footfall frames
+    foot_falls = []
+    for (scorer, individual), event_dict in results['events'].items():
+        for foot, frames in event_dict.items():
+            for frame in frames:
+                foot_falls.append(frame)
+    
+    if len(foot_falls) == 0:
+        return np.zeros(1)
+    
+    foot_falls.sort()
+    max_frame = foot_falls[-1]
+    
+    # Create binary array marking footfall frames
+    footfall_binary = np.zeros(max_frame + 1, dtype=float)
+    for f in foot_falls:
+        footfall_binary[f] = 1.0
+    
+    # Create rolling window kernel (uniform weights)
+    kernel = np.ones(window)
+    
+    # Apply rolling sum using convolution (centered window)
+    # 'same' mode keeps output same length as input
+    rolling_count = np.convolve(footfall_binary, kernel, mode='same')
+    
+    # Normalize to [0, 1] range
+    max_count = np.max(rolling_count)
+    if max_count > 0:
+        speed_array = rolling_count / max_count
+    else:
+        speed_array = rolling_count
+    
+    return speed_array
+
+
 def get_speed_from_zeni(results: dict = {}, window: int = 30):
     """
     Calculate relative running speed for each frame based on footfall frequency.

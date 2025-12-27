@@ -19,7 +19,7 @@ from datafawn.soundscape.audio_utils import (
     audio_time_mirror,
     create_backing_track_with_speed_scaling,
 )
-from datafawn.soundscape.event_utils import get_speed_from_zeni
+from datafawn.soundscape.event_utils import get_speed_from_zeni_smooth
 
 
 def soundscape_auto(
@@ -29,9 +29,11 @@ def soundscape_auto(
     output_path: Optional[Union[str, Path]] = None,
     std_dev: float = 1.5,
     speed_threshold: Optional[float] = 0.8,
+    speed_window: int = 60,
     backing_track_path: Optional[Union[str, Path]] = 'sounds/calm_ambient_backing.wav',
     backing_track_base_volume: float = 0.5,
-    backing_track_max_volume: float = 1.0
+    backing_track_max_volume: float = 1.0,
+    backing_track_volume_curve: float = 3.0
 ) -> str:
     """
     Generate a soundscape by automatically selecting notes based on movement speed.
@@ -64,7 +66,11 @@ def soundscape_auto(
     speed_threshold : float, optional
         Speed threshold (0.0-1.0) for applying reverse effect. When speed
         crosses this threshold, the audio clip will be reversed. If None,
-        no reverse effect is applied.
+        no reverse effect is applied. Also controls when backing track reaches max volume.
+    speed_window : int, default=60
+        Size of rolling window (in frames) for speed calculation. Larger values
+        produce smoother volume transitions, smaller values are more responsive.
+        At 30 fps, 60 frames = 2 seconds of smoothing.
     backing_track_path : str or Path, optional
         Path to backing track audio file. If provided, the backing track volume
         will be continuously scaled by the speed_array (louder when faster).
@@ -76,6 +82,13 @@ def soundscape_auto(
         Maximum volume when speed is 1.0, relative to original sound level.
         Default is 1.0 (100% of original volume). The backing track will be
         loudest when the animal is moving at maximum speed.
+    backing_track_volume_curve : float, default=3.0
+        Power curve for volume scaling. Higher values keep volume near base_volume
+        longer, only ramping up close to speed_threshold.
+        - 1.0 = linear scaling
+        - 2.0 = quadratic (moderate curve)
+        - 3.0 = cubic (default, stays flat until near threshold)
+        - 4.0+ = more extreme curve
     
     Returns
     -------
@@ -114,8 +127,6 @@ def soundscape_auto(
         note_file = notes_folder_path / f"{note_name}.wav"
         if note_file.exists():
             back_feet_files.append(note_file)
-        else:
-            print(f"Warning: Note file not found: {note_file}, skipping...")
     
     # Load front feet notes
     front_feet_files = []
@@ -123,32 +134,19 @@ def soundscape_auto(
         note_file = notes_folder_path / f"{note_name}.wav"
         if note_file.exists():
             front_feet_files.append(note_file)
-        else:
-            print(f"Warning: Note file not found: {note_file}, skipping...")
     
     if len(back_feet_files) == 0:
         raise ValueError(f"No valid back feet note files found in {notes_folder}")
     if len(front_feet_files) == 0:
         raise ValueError(f"No valid front feet note files found in {notes_folder}")
     
-    print(f"\nFound {len(back_feet_files)} back feet note files: {[f.name for f in back_feet_files]}")
-    print(f"Found {len(front_feet_files)} front feet note files: {[f.name for f in front_feet_files]}")
+    print(f"Loaded {len(back_feet_files)} back feet notes, {len(front_feet_files)} front feet notes")
     
-    # Calculate speed array using get_speed_from_zeni
-    # Wrap events_dict in results dict format
+    # Calculate speed array using rolling window for smooth transitions
     results_dict = {'events': events_dict}
-    speed_array = get_speed_from_zeni(results_dict)
-    print(f"Speed array calculated: {len(speed_array)} frames")
-    
-    # Debug output for speed_array
-    non_zero_count = np.count_nonzero(speed_array)
-    non_zero_percentage = (non_zero_count / len(speed_array)) * 100
-    speed_min = np.min(speed_array)
-    speed_max = np.max(speed_array)
-    speed_mean = np.mean(speed_array)
-    speed_std = np.std(speed_array)
-    print(f"Speed array stats: min={speed_min:.3f}, max={speed_max:.3f}, mean={speed_mean:.3f}, std={speed_std:.3f}")
-    print(f"Speed array: {non_zero_count}/{len(speed_array)} frames non-zero ({non_zero_percentage:.1f}%)")
+    speed_array = get_speed_from_zeni_smooth(results_dict, window=speed_window)
+    non_zero_pct = (np.count_nonzero(speed_array) / len(speed_array)) * 100
+    print(f"Speed array: {len(speed_array)} frames, range [{np.min(speed_array):.2f}, {np.max(speed_array):.2f}], {non_zero_pct:.1f}% active")
     
     # Create audio clips for all events from all individuals
     all_audio_clips = []
@@ -161,16 +159,11 @@ def soundscape_auto(
         
         # Iterate through each event type for this individual
         for event_name, strike_frames in event_dict.items():
-            print(f"\n  Processing {event_name}:")
             if len(strike_frames) == 0:
-                print(f"    No strikes found for {event_name}, skipping...")
                 continue
-            
-            print(f"    Found {len(strike_frames)} strikes")
             
             # Convert frame numbers to timestamps
             strike_times = [frame_to_timestamp(frame, video_fps) for frame in strike_frames]
-            print(f"    Strike timestamps: {[f'{t:.2f}s' for t in strike_times[:3]]}..." if len(strike_times) > 3 else f"    Strike timestamps: {[f'{t:.2f}s' for t in strike_times]}")
             
             # Determine if this is a front or back foot event
             is_front_foot = event_name.startswith('front_')
@@ -219,20 +212,12 @@ def soundscape_auto(
                 
                 event_audio_clips.append(note_clip)
            
-            # Print summary of note selections
+            # Summary for this event
             if len(note_selections) > 0:
-                avg_speed = np.mean([s[0] for s in note_selections])
-                note_counts = {}
-                reversed_count = 0
-                for speed, note, is_reversed in note_selections:
-                    note_counts[note] = note_counts.get(note, 0) + 1
-                    if is_reversed:
-                        reversed_count += 1
-                top_notes = sorted(note_counts.items(), key=lambda x: x[1], reverse=True)[:3]
-                reverse_info = f", {reversed_count} reversed" if speed_threshold is not None else ""
-                print(f"    Average speed: {avg_speed:.3f}, top notes: {top_notes}{reverse_info}")
+                reversed_count = sum(1 for _, _, r in note_selections if r)
+                reverse_info = f", {reversed_count} reversed" if speed_threshold is not None and reversed_count > 0 else ""
+                print(f"    {event_name}: {len(event_audio_clips)} clips{reverse_info}")
             
-            print(f"    Created {len(event_audio_clips)} audio clips for {event_name}")
             all_audio_clips.extend(event_audio_clips)
     
     print(f"\nTotal audio clips created: {len(all_audio_clips)}")
@@ -242,58 +227,42 @@ def soundscape_auto(
     if backing_track_path is not None:
         backing_track_path_obj = Path(backing_track_path)
         if backing_track_path_obj.exists():
-            print(f"\n{'='*60}")
-            print("Processing backing track with speed-based volume scaling")
-            print(f"{'='*60}")
+            print(f"\nProcessing backing track (volume: {backing_track_base_volume:.1f}x - {backing_track_max_volume:.1f}x, curve: {backing_track_volume_curve})")
+            # Use speed_threshold for backing track volume scaling (default to 0.8 if None)
+            bt_threshold = speed_threshold if speed_threshold is not None else 0.8
             backing_track_clip = create_backing_track_with_speed_scaling(
                 backing_track_path=backing_track_path,
                 video_duration=video.duration,
                 speed_array=speed_array,
                 video_fps=video_fps,
                 base_volume=backing_track_base_volume,
-                max_volume=backing_track_max_volume
+                max_volume=backing_track_max_volume,
+                speed_threshold=bt_threshold,
+                volume_curve=backing_track_volume_curve
             )
         else:
-            print(f"Warning: Backing track file not found: {backing_track_path}, skipping...")
+            print(f"Warning: Backing track not found: {backing_track_path}")
     
     # Combine all audio sources: backing track, original video audio, and strike sounds
     audio_clips_to_composite = []
     
     # Add backing track first (lowest layer)
     if backing_track_clip is not None:
-        # Debug: verify backing track has audio
-        print(f"Backing track clip info: duration={backing_track_clip.duration:.2f}s, fps={backing_track_clip.fps}, nchannels={getattr(backing_track_clip, 'nchannels', 'unknown')}")
         audio_clips_to_composite.append(backing_track_clip)
-        print(f"Added backing track to composite (total clips: {len(audio_clips_to_composite)})")
-    else:
-        print("No backing track clip to add")
+        print(f"Adding backing track: {backing_track_clip.duration:.2f}s")
     
     # Add original video audio if present
     if video.audio is not None:
-        original_audio = video.audio
-        audio_clips_to_composite.append(original_audio)
-        print(f"Original video audio included: duration={original_audio.duration:.2f}s")
-    else:
-        print("No original video audio found, skipping...")
+        audio_clips_to_composite.append(video.audio)
+        print(f"Adding original video audio: {video.audio.duration:.2f}s")
     
     # Add all strike sounds
     audio_clips_to_composite.extend(all_audio_clips)
-    print(f"Added {len(all_audio_clips)} event audio clips to composite")
-    
-    # Debug: List all clips in composite
-    print(f"\n{'='*60}")
-    print(f"COMPOSITE DEBUG: Total clips to composite: {len(audio_clips_to_composite)}")
-    for i, clip in enumerate(audio_clips_to_composite):
-        clip_type = type(clip).__name__
-        clip_dur = getattr(clip, 'duration', 'unknown')
-        clip_start = getattr(clip, 'start', 0)
-        print(f"  Clip {i}: {clip_type}, duration={clip_dur}, start={clip_start}")
-    print(f"{'='*60}\n")
     
     # Create final composite audio
+    print(f"\nCompositing {len(audio_clips_to_composite)} audio clips...")
     if len(audio_clips_to_composite) > 0:
         final_audio = CompositeAudioClip(audio_clips_to_composite)
-        print(f"Created CompositeAudioClip: duration={final_audio.duration:.2f}s")
     else:
         final_audio = None
     

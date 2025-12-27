@@ -4,7 +4,6 @@ Concrete implementations for the event detection pipeline.
 These classes wrap existing functions to make them compatible with the pipeline.
 """
 
-from ast import Pass
 from typing import Dict, Any, Optional, Union
 from pathlib import Path
 
@@ -24,9 +23,11 @@ class SoundScapeAuto(SoundScapeGenerator):
         notes_folder: Union[str, Path] = "sounds/custom_tone",
         std_dev: float = 1.5,
         speed_threshold: Optional[float] = 0.8,
+        speed_window: int = 60,
         backing_track_path: Optional[Union[str, Path]] = None,
         backing_track_base_volume: float = 1.0,
-        backing_track_max_volume: float = 1.0
+        backing_track_max_volume: float = 1.0,
+        backing_track_volume_curve: float = 3.0
     ):
         """
         Initialize the SoundScapeAuto generator.
@@ -41,7 +42,10 @@ class SoundScapeAuto(SoundScapeGenerator):
         speed_threshold : float, optional
             Speed threshold (0.0-1.0) for applying reverse effect. When speed
             crosses this threshold, the audio clip will be reversed. If None,
-            no reverse effect is applied.
+            no reverse effect is applied. Also controls when backing track reaches max volume.
+        speed_window : int, default=60
+            Size of rolling window (in frames) for speed calculation. Larger values
+            produce smoother volume transitions, smaller values are more responsive.
         backing_track_path : str or Path, optional
             Path to backing track audio file. If provided, the backing track volume
             will be continuously scaled by the speed_array (louder when faster).
@@ -53,13 +57,19 @@ class SoundScapeAuto(SoundScapeGenerator):
             Maximum volume when speed is 1.0, relative to original sound level.
             Default is 1.0 (100% of original volume). The backing track will be
             loudest when the animal is moving at maximum speed.
+        backing_track_volume_curve : float, default=3.0
+            Power curve for volume scaling. Higher values keep volume near base
+            longer, only ramping up close to speed_threshold.
+            - 1.0 = linear, 2.0 = quadratic, 3.0 = cubic (default), 4.0+ = more extreme
         """
         self.notes_folder = notes_folder
         self.std_dev = std_dev
         self.speed_threshold = speed_threshold
+        self.speed_window = speed_window
         self.backing_track_path = backing_track_path
         self.backing_track_base_volume = backing_track_base_volume
         self.backing_track_max_volume = backing_track_max_volume
+        self.backing_track_volume_curve = backing_track_volume_curve
     
     
     def generate(
@@ -99,13 +109,14 @@ class SoundScapeAuto(SoundScapeGenerator):
             input_video_path=input_video_path,
             events_dict=events_dict,
             output_path=output_path,
-
             notes_folder=self.notes_folder,
             std_dev=self.std_dev,
             speed_threshold=self.speed_threshold,
+            speed_window=self.speed_window,
             backing_track_path=self.backing_track_path,
             backing_track_base_volume=self.backing_track_base_volume,
-            backing_track_max_volume=self.backing_track_max_volume
+            backing_track_max_volume=self.backing_track_max_volume,
+            backing_track_volume_curve=self.backing_track_volume_curve
         )
 
 
