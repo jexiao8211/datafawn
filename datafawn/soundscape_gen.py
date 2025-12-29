@@ -22,12 +22,14 @@ class SoundScapeAuto(SoundScapeGenerator):
         self, 
         notes_folder: Union[str, Path] = "sounds/custom_tone",
         std_dev: float = 1.5,
-        speed_threshold: Optional[float] = 0.8,
+        speed_threshold: Optional[float] = 6.0,
         speed_window: int = 60,
         backing_track_path: Optional[Union[str, Path]] = None,
         backing_track_base_volume: float = 1.0,
         backing_track_max_volume: float = 1.0,
-        backing_track_volume_curve: float = 3.0
+        backing_track_volume_curve: float = 3.0,
+        show_speed_plot: bool = False,
+        speed_plot_path: Optional[Union[str, Path]] = None
     ):
         """
         Initialize the SoundScapeAuto generator.
@@ -39,28 +41,27 @@ class SoundScapeAuto(SoundScapeGenerator):
         std_dev : float, default=1.5
             Standard deviation for note sampling distribution. Higher values allow
             more randomness around the speed-based center note.
-        speed_threshold : float, optional
-            Speed threshold (0.0-1.0) for applying reverse effect. When speed
-            crosses this threshold, the audio clip will be reversed. If None,
-            no reverse effect is applied. Also controls when backing track reaches max volume.
+        speed_threshold : float, default=6.0
+            ABSOLUTE speed threshold (footfalls per window) for applying reverse
+            effect and for backing track to reach max volume. Typical values: 4-10.
         speed_window : int, default=60
             Size of rolling window (in frames) for speed calculation. Larger values
-            produce smoother volume transitions, smaller values are more responsive.
+            produce smoother speed curves, smaller values are more responsive.
         backing_track_path : str or Path, optional
             Path to backing track audio file. If provided, the backing track volume
             will be continuously scaled by the speed_array (louder when faster).
         backing_track_base_volume : float, default=0.5
             Minimum volume when speed is 0.0, relative to original sound level.
-            Default is 0.5 (50% of original volume). The backing track will be
-            quietest when the animal is stationary.
         backing_track_max_volume : float, default=1.0
-            Maximum volume when speed is 1.0, relative to original sound level.
-            Default is 1.0 (100% of original volume). The backing track will be
-            loudest when the animal is moving at maximum speed.
+            Maximum volume when speed reaches threshold, relative to original sound level.
         backing_track_volume_curve : float, default=3.0
             Power curve for volume scaling. Higher values keep volume near base
             longer, only ramping up close to speed_threshold.
             - 1.0 = linear, 2.0 = quadratic, 3.0 = cubic (default), 4.0+ = more extreme
+        show_speed_plot : bool, default=False
+            If True, displays a line graph of speed over time (useful for choosing threshold).
+        speed_plot_path : str or Path, optional
+            If provided, saves the speed plot to this path instead of displaying it.
         """
         self.notes_folder = notes_folder
         self.std_dev = std_dev
@@ -70,6 +71,8 @@ class SoundScapeAuto(SoundScapeGenerator):
         self.backing_track_base_volume = backing_track_base_volume
         self.backing_track_max_volume = backing_track_max_volume
         self.backing_track_volume_curve = backing_track_volume_curve
+        self.show_speed_plot = show_speed_plot
+        self.speed_plot_path = speed_plot_path
     
     
     def generate(
@@ -116,7 +119,9 @@ class SoundScapeAuto(SoundScapeGenerator):
             backing_track_path=self.backing_track_path,
             backing_track_base_volume=self.backing_track_base_volume,
             backing_track_max_volume=self.backing_track_max_volume,
-            backing_track_volume_curve=self.backing_track_volume_curve
+            backing_track_volume_curve=self.backing_track_volume_curve,
+            show_speed_plot=self.show_speed_plot,
+            speed_plot_path=self.speed_plot_path
         )
 
 

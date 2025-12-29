@@ -19,7 +19,11 @@ from datafawn.soundscape.audio_utils import (
     audio_time_mirror,
     create_backing_track_with_speed_scaling,
 )
-from datafawn.soundscape.event_utils import get_speed_from_zeni_smooth
+from datafawn.soundscape.event_utils import (
+    get_speed_absolute,
+    print_speed_stats,
+    plot_speed_array,
+)
 
 
 def soundscape_auto(
@@ -28,12 +32,14 @@ def soundscape_auto(
     notes_folder: Union[str, Path] = "sounds/custom_tone",
     output_path: Optional[Union[str, Path]] = None,
     std_dev: float = 1.5,
-    speed_threshold: Optional[float] = 0.8,
+    speed_threshold: Optional[float] = 6.0,
     speed_window: int = 60,
     backing_track_path: Optional[Union[str, Path]] = 'sounds/calm_ambient_backing.wav',
     backing_track_base_volume: float = 0.5,
     backing_track_max_volume: float = 1.0,
-    backing_track_volume_curve: float = 3.0
+    backing_track_volume_curve: float = 3.0,
+    show_speed_plot: bool = False,
+    speed_plot_path: Optional[Union[str, Path]] = None
 ) -> str:
     """
     Generate a soundscape by automatically selecting notes based on movement speed.
@@ -42,6 +48,9 @@ def soundscape_auto(
     Front feet sample from C6 to G7, while back feet sample from C5 to G6 (one
     octave lower). The sampling is weighted by speed: higher relative speeds
     increase the probability of selecting higher notes using a normal distribution.
+    
+    Speed is measured in ABSOLUTE terms (footfalls per window), not relative to
+    the video's maximum. This allows consistent thresholds across different videos.
     
     Parameters
     -----------
@@ -63,25 +72,22 @@ def soundscape_auto(
     std_dev : float, default=1.5
         Standard deviation for note sampling distribution. Higher values allow
         more randomness around the speed-based center note.
-    speed_threshold : float, optional
-        Speed threshold (0.0-1.0) for applying reverse effect. When speed
-        crosses this threshold, the audio clip will be reversed. If None,
-        no reverse effect is applied. Also controls when backing track reaches max volume.
+    speed_threshold : float, default=6.0
+        ABSOLUTE speed threshold (footfalls per window) for applying reverse effect
+        and for backing track to reach max volume. When speed crosses this threshold,
+        the audio clip will be reversed. Set to None to disable reverse effect.
+        Typical values: 4-10 depending on animal and video.
     speed_window : int, default=60
         Size of rolling window (in frames) for speed calculation. Larger values
-        produce smoother volume transitions, smaller values are more responsive.
+        produce smoother speed curves, smaller values are more responsive.
         At 30 fps, 60 frames = 2 seconds of smoothing.
     backing_track_path : str or Path, optional
         Path to backing track audio file. If provided, the backing track volume
         will be continuously scaled by the speed_array (louder when faster).
     backing_track_base_volume : float, default=0.5
         Minimum volume when speed is 0.0, relative to original sound level.
-        Default is 0.5 (50% of original volume). The backing track will be
-        quietest when the animal is stationary.
     backing_track_max_volume : float, default=1.0
-        Maximum volume when speed is 1.0, relative to original sound level.
-        Default is 1.0 (100% of original volume). The backing track will be
-        loudest when the animal is moving at maximum speed.
+        Maximum volume when speed reaches threshold, relative to original sound level.
     backing_track_volume_curve : float, default=3.0
         Power curve for volume scaling. Higher values keep volume near base_volume
         longer, only ramping up close to speed_threshold.
@@ -89,6 +95,10 @@ def soundscape_auto(
         - 2.0 = quadratic (moderate curve)
         - 3.0 = cubic (default, stays flat until near threshold)
         - 4.0+ = more extreme curve
+    show_speed_plot : bool, default=False
+        If True, displays a line graph of speed over time (useful for choosing threshold).
+    speed_plot_path : str or Path, optional
+        If provided, saves the speed plot to this path instead of displaying it.
     
     Returns
     -------
@@ -116,8 +126,8 @@ def soundscape_auto(
     
     # Define major scale notes for back feet (C5 to G6) and front feet (C6 to G7)
     # Major scale pattern: C, D, E, F, G, A, B repeated across octaves
-    back_feet_notes = ["C5", "D5", "E5", "F5", "G5", "A5", "B5", "C6", "D6", "E6", "F6", "G6"]
-    front_feet_notes = ["C6", "D6", "E6", "F6", "G6", "A6", "B6", "C7", "D7", "E7", "F7", "G7"]
+    back_feet_notes = ["C4", "D4", "E4", "F4", "G4", "A4", "B4", "C5", "D5", "E5", "F5", "G5", "A5", "B5", "C6", "D6", "E6", "F6", "G6", "A6", "B6"]
+    front_feet_notes = ["C5", "D5", "E5", "F5", "G5", "A5", "B5", "C6", "D6", "E6", "F6", "G6", "A6", "B6", "C7", "D7", "E7", "F7", "G7", "A7", "B7"]
     
     notes_folder_path = Path(notes_folder)
     
@@ -142,11 +152,22 @@ def soundscape_auto(
     
     print(f"Loaded {len(back_feet_files)} back feet notes, {len(front_feet_files)} front feet notes")
     
-    # Calculate speed array using rolling window for smooth transitions
+    # Calculate ABSOLUTE speed array (footfalls per window, not normalized)
     results_dict = {'events': events_dict}
-    speed_array = get_speed_from_zeni_smooth(results_dict, window=speed_window)
-    non_zero_pct = (np.count_nonzero(speed_array) / len(speed_array)) * 100
-    print(f"Speed array: {len(speed_array)} frames, range [{np.min(speed_array):.2f}, {np.max(speed_array):.2f}], {non_zero_pct:.1f}% active")
+    speed_array = get_speed_absolute(results_dict, window=speed_window)
+    
+    # Print speed statistics to help choose thresholds
+    print_speed_stats(speed_array, fps=video_fps)
+    
+    # Show/save speed plot if requested
+    if show_speed_plot or speed_plot_path:
+        plot_speed_array(
+            speed_array, 
+            fps=video_fps, 
+            title=f"Speed Over Time - {input_video_path.name}",
+            save_path=str(speed_plot_path) if speed_plot_path else None,
+            threshold=speed_threshold
+        )
     
     # Create audio clips for all events from all individuals
     all_audio_clips = []
@@ -174,7 +195,7 @@ def soundscape_auto(
             note_selections = []  # Track selections for summary
             
             for frame, strike_time in zip(strike_frames, strike_times):
-                # Get speed for this frame (handle out-of-bounds)
+                # Get absolute speed for this frame (footfalls per window)
                 if frame < len(speed_array):
                     speed = speed_array[frame]
                 else:
@@ -182,8 +203,17 @@ def soundscape_auto(
                     if len(event_audio_clips) == 0:  # Only warn once per event type
                         print(f"    Warning: Some frames beyond speed array, using speed 0.0")
                 
-                # Map speed (0.0-1.0) to note index (0 to len(note_files)-1) for distribution center
-                center_index = speed * (len(note_files) - 1)
+                # Normalize speed to 0-1 for note selection (relative to threshold)
+                # Speed at or above threshold maps to 1.0 (highest notes)
+                effective_threshold = speed_threshold if speed_threshold is not None else max(np.max(speed_array), 1.0)
+                speed_normalized = min(speed / effective_threshold, 1.0)
+                
+                # Map normalized speed to note index for distribution center
+                # Leave room for distribution tails (std_dev away from edges)
+                # This ensures both left and right tails have room to sample from
+                min_center = std_dev
+                max_center = len(note_files) - 1 - std_dev
+                center_index = min_center + speed_normalized * (max_center - min_center)
                 
                 # Sample note index using normal distribution
                 sampled_index = np.random.normal(center_index, std_dev)
@@ -194,7 +224,7 @@ def soundscape_auto(
                 # Select note file
                 note_path = note_files[sampled_index]
                 
-                # Check if we should reverse the audio (speed crosses threshold)
+                # Check if we should reverse the audio (absolute speed crosses threshold)
                 should_reverse = (speed_threshold is not None and speed >= speed_threshold)
                 note_selections.append((speed, note_path.name, should_reverse))
                 
@@ -227,9 +257,9 @@ def soundscape_auto(
     if backing_track_path is not None:
         backing_track_path_obj = Path(backing_track_path)
         if backing_track_path_obj.exists():
-            print(f"\nProcessing backing track (volume: {backing_track_base_volume:.1f}x - {backing_track_max_volume:.1f}x, curve: {backing_track_volume_curve})")
-            # Use speed_threshold for backing track volume scaling (default to 0.8 if None)
-            bt_threshold = speed_threshold if speed_threshold is not None else 0.8
+            # Use speed_threshold for backing track (default to max speed if None)
+            bt_threshold = speed_threshold if speed_threshold is not None else max(np.max(speed_array), 1.0)
+            print(f"\nProcessing backing track (volume: {backing_track_base_volume:.1f}x - {backing_track_max_volume:.1f}x at speed>={bt_threshold:.1f})")
             backing_track_clip = create_backing_track_with_speed_scaling(
                 backing_track_path=backing_track_path,
                 video_duration=video.duration,
