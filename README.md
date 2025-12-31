@@ -6,6 +6,7 @@ A modular, extensible pipeline system for pose estimation, postprocessing, event
 
 DataFawn transforms raw video footage into expressive, sonified visualizations by combining computer vision, signal processing, and audio synthesis. The system utilizes advanced pose estimation and event extraction techniques to create meaningful audio-visual representations of movement patterns.
 
+See demo! (inspired by this tiktok: https://www.tiktok.com/t/ZTrojbBUY/)
 https://github.com/user-attachments/assets/b73fa127-590f-459a-b1bc-fb111b1405c6
 
 **Project Purpose:** DataFawn enables users to generate expressive videos that translate movement data into interesting compositions. By detecting and analyzing behavioral events in animal movement videos, the pipeline creates synchronized soundscapes where each movement event triggers corresponding notes, producing a fun representation of motion.
