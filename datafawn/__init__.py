@@ -8,7 +8,7 @@ from datafawn.pipeline import (
     EventDetectionPipeline,
     PoseEstimator,
     Postprocessor,
-    EventExtractor ,
+    EventExtractor,
     SoundScapeGenerator
 )
 

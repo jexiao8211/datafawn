@@ -83,15 +83,18 @@ class DeepLabCutPoseEstimator(PoseEstimator):
         """
         import deeplabcut
         import torch
-        from pathlib import Path
         
         video_path = Path(video_path)
         videotype = video_path.suffix
         
         # Get device
         if self.device is None:
-            device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-            print("No device specified, using auto-detection. Using: ", torch.cuda.get_device_name(0))
+            if torch.cuda.is_available():
+                device = torch.device('cuda')
+                print(f"No device specified, using auto-detection. Using: {torch.cuda.get_device_name(0)}")
+            else:
+                device = torch.device('cpu')
+                print("No device specified, using auto-detection. Using: CPU")
         else:
             device = torch.device(self.device)
         

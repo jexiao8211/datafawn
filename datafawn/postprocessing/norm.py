@@ -1,13 +1,22 @@
+"""
+Normalization utilities for pose data.
+
+This module provides functions for converting absolute coordinates to relative
+coordinates, which are useful for event detection algorithms.
+"""
+
+import pandas as pd
+from typing import Union
 
 
-def get_coords(df, bodypart, coord, scorer, individual):
+def get_coords(df: pd.DataFrame, bodypart: str, coord: str, scorer: str, individual: str) -> pd.Series:
     """Extract coordinates for a specific body part."""
     # Use .xs() for efficient MultiIndex indexing, then select the coordinate
     coords = df.xs((scorer, individual, bodypart), level=[0, 1, 2], axis=1)[coord]
 
     return coords
 
-def paw_to_relative_position(df, append_to_df=True):
+def paw_to_relative_position(df: pd.DataFrame, append_to_df: bool = True) -> pd.DataFrame:
     """
     Convert paw coordinates to relative position coordinates.
     
